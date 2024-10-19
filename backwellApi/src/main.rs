@@ -1,55 +1,37 @@
-use actix_web::{get, web, App, HttpResponse, HttpServer, Responder};
-use diesel::prelude::*;
-use diesel::r2d2::{self, ConnectionManager};
-use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+// src/main.rs
+
+use actix_web::{web, App, HttpServer};
 use dotenvy::dotenv;
 use std::env;
+use diesel::r2d2::{self, ConnectionManager};
+use diesel::PgConnection;
 
-pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
-
-type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
-
-#[get("/")]
-async fn index() -> impl Responder {
-    HttpResponse::Ok().body("¡Hola desde Rust y Actix-web!")
-}
+mod handlers;
+mod models;
+mod routes;
+mod utils;
+mod schema;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    // Load environment variables from .env
     dotenv().ok();
 
-    let args: Vec<String> = env::args().collect();
+    // Get the database URL from environment variables
+    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
-    let database_url = env::var("DATABASE_URL")
-        .expect("DATABASE_URL debe estar configurado en .env o variables de entorno");
-
+    // Create the database connection pool
     let manager = ConnectionManager::<PgConnection>::new(database_url);
-
     let pool = r2d2::Pool::builder()
         .build(manager)
-        .expect("No se pudo crear el pool de conexiones");
+        .expect("Failed to create pool.");
 
-    if args.len() > 1 && args[1] == "migrate" {
-        // Ejecutar migraciones pendientes
-        println!("Ejecutando migraciones pendientes...");
-        let mut conn = pool.get().expect("No se pudo obtener la conexión del pool");
-        match conn.run_pending_migrations(MIGRATIONS) {
-            Ok(migrations) => {
-                println!("Migraciones ejecutadas: {:?}", migrations);
-            }
-            Err(e) => {
-                eprintln!("Error al ejecutar migraciones: {}", e);
-            }
-        }
-        return Ok(());
-    }
-
-    println!("Servidor corriendo en http://0.0.0.0:8080");
-
+    // Start the HTTP server
+    println!("Starting server at http://0.0.0.0:8080");
     HttpServer::new(move || {
         App::new()
-            .app_data(web::Data::new(pool.clone()))
-            .service(index)
+            .app_data(web::Data::new(pool.clone())) // Add the pool to the application data
+            .configure(routes::init_routes) // Configure routes
     })
     .bind(("0.0.0.0", 8080))?
     .run()

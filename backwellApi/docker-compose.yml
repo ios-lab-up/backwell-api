@@ -20,9 +20,6 @@ services:
         condition: service_healthy
     networks:
       - app_network
-    # Comenta o elimina el volumen si causa problemas
-    # volumes:
-    #   - .:/app
 
   db:
     image: postgres:16

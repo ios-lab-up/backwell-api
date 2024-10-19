@@ -1,17 +1,59 @@
+// src/handlers/user_handlers.rs
+
 use actix_web::{web, HttpResponse, Responder};
 use diesel::prelude::*;
-use crate::models::{User, NewUser};
-use crate::schema::users::dsl::*;
-use crate::DbPool;
 use uuid::Uuid;
 use bcrypt::{hash, verify};
+use serde::Deserialize;
 
-pub async fn get_users(pool: web::Data<DbPool>) -> impl Responder {
+use crate::models::{NewUser, User};
+use crate::utils::auth::{create_jwt};
+use crate::utils::auth_middleware::AuthorizedUser;
+
+// Importar la tabla users desde models::user
+use crate::models::user::users::dsl::*;
+
+type DbPool = r2d2::Pool<diesel::r2d2::ConnectionManager<PgConnection>>;
+
+#[derive(Deserialize)]
+pub struct LoginInfo {
+    pub username: String,
+    pub password: String,
+}
+
+pub async fn login(pool: web::Data<DbPool>, info: web::Json<LoginInfo>) -> impl Responder {
     let conn = pool.get().expect("No se pudo obtener la conexión del pool");
+    let login_info = info.into_inner();
 
     let result = web::block(move || {
-        users.load::<User>(&conn)
-    }).await;
+        users
+            .filter(username.eq(login_info.username))
+            .first::<User>(&conn)
+    })
+    .await;
+
+    match result {
+        Ok(user) => {
+            if verify(&login_info.password, &user.password).unwrap_or(false) {
+                match create_jwt(&user.id.to_string()) {
+                    Ok(token) => HttpResponse::Ok().json(serde_json::json!({ "token": token })),
+                    Err(e) => {
+                        eprintln!("Error al crear token: {:?}", e);
+                        HttpResponse::InternalServerError().body("Error al crear token")
+                    }
+                }
+            } else {
+                HttpResponse::Unauthorized().body("Credenciales incorrectas")
+            }
+        }
+        Err(_) => HttpResponse::Unauthorized().body("Credenciales incorrectas"),
+    }
+}
+
+pub async fn get_users(pool: web::Data<DbPool>, _user: AuthorizedUser) -> impl Responder {
+    let conn = pool.get().expect("No se pudo obtener la conexión del pool");
+
+    let result = web::block(move || users.load::<User>(&conn)).await;
 
     match result {
         Ok(user_list) => HttpResponse::Ok().json(user_list),
@@ -22,13 +64,15 @@ pub async fn get_users(pool: web::Data<DbPool>) -> impl Responder {
     }
 }
 
-pub async fn get_user(pool: web::Data<DbPool>, user_id: web::Path<Uuid>) -> impl Responder {
+pub async fn get_user(
+    pool: web::Data<DbPool>,
+    user_id: web::Path<Uuid>,
+    _user: AuthorizedUser,
+) -> impl Responder {
     let conn = pool.get().expect("No se pudo obtener la conexión del pool");
     let user_id = user_id.into_inner();
 
-    let result = web::block(move || {
-        users.filter(id.eq(user_id)).first::<User>(&conn)
-    }).await;
+    let result = web::block(move || users.filter(id.eq(user_id)).first::<User>(&conn)).await;
 
     match result {
         Ok(user) => HttpResponse::Ok().json(user),
@@ -54,8 +98,11 @@ pub async fn create_user(pool: web::Data<DbPool>, new_user: web::Json<NewUser>) 
     }
 
     let result = web::block(move || {
-        diesel::insert_into(users).values(&user).get_result::<User>(&conn)
-    }).await;
+        diesel::insert_into(users)
+            .values(&user)
+            .get_result::<User>(&conn)
+    })
+    .await;
 
     match result {
         Ok(user) => HttpResponse::Created().json(user),
@@ -66,7 +113,12 @@ pub async fn create_user(pool: web::Data<DbPool>, new_user: web::Json<NewUser>) 
     }
 }
 
-pub async fn update_user(pool: web::Data<DbPool>, user_id: web::Path<Uuid>, updated_user: web::Json<NewUser>) -> impl Responder {
+pub async fn update_user(
+    pool: web::Data<DbPool>,
+    user_id: web::Path<Uuid>,
+    updated_user: web::Json<NewUser>,
+    _user: AuthorizedUser,
+) -> impl Responder {
     let conn = pool.get().expect("No se pudo obtener la conexión del pool");
     let user_id = user_id.into_inner();
     let updated_user = updated_user.into_inner();
@@ -81,7 +133,8 @@ pub async fn update_user(pool: web::Data<DbPool>, user_id: web::Path<Uuid>, upda
                 is_staff.eq(updated_user.is_staff),
             ))
             .get_result::<User>(&conn)
-    }).await;
+    })
+    .await;
 
     match result {
         Ok(user) => HttpResponse::Ok().json(user),
@@ -92,13 +145,15 @@ pub async fn update_user(pool: web::Data<DbPool>, user_id: web::Path<Uuid>, upda
     }
 }
 
-pub async fn delete_user(pool: web::Data<DbPool>, user_id: web::Path<Uuid>) -> impl Responder {
+pub async fn delete_user(
+    pool: web::Data<DbPool>,
+    user_id: web::Path<Uuid>,
+    _user: AuthorizedUser,
+) -> impl Responder {
     let conn = pool.get().expect("No se pudo obtener la conexión del pool");
     let user_id = user_id.into_inner();
 
-    let result = web::block(move || {
-        diesel::delete(users.filter(id.eq(user_id))).execute(&conn)
-    }).await;
+    let result = web::block(move || diesel::delete(users.filter(id.eq(user_id))).execute(&conn)).await;
 
     match result {
         Ok(_) => HttpResponse::Ok().body("Usuario eliminado."),
@@ -106,44 +161,5 @@ pub async fn delete_user(pool: web::Data<DbPool>, user_id: web::Path<Uuid>) -> i
             eprintln!("Error al eliminar usuario: {:?}", e);
             HttpResponse::InternalServerError().finish()
         }
-    }
-}
-
-use actix_web::{web, HttpResponse, Responder};
-use diesel::prelude::*;
-use crate::models::User;
-use crate::schema::users::dsl::*;
-use crate::DbPool;
-use crate::utils::auth::create_jwt;
-use serde::Deserialize;
-use bcrypt::verify;
-
-#[derive(Deserialize)]
-pub struct LoginInfo {
-    pub username: String,
-    pub password: String,
-}
-
-pub async fn login(pool: web::Data<DbPool>, info: web::Json<LoginInfo>) -> impl Responder {
-    let conn = pool.get().expect("No se pudo obtener la conexión del pool");
-    let login_info = info.into_inner();
-
-    let result = web::block(move || {
-        users.filter(username.eq(login_info.username)).first::<User>(&conn)
-    }).await;
-
-    match result {
-        Ok(user) => {
-            if verify(&login_info.password, &user.password).unwrap_or(false) {
-                if let Ok(token) = create_jwt(&user.id.to_string()) {
-                    return HttpResponse::Ok().json(serde_json::json!({ "token": token }));
-                } else {
-                    return HttpResponse::InternalServerError().body("Error al crear token");
-                }
-            } else {
-                return HttpResponse::Unauthorized().body("Credenciales incorrectas");
-            }
-        }
-        Err(_) => HttpResponse::Unauthorized().body("Credenciales incorrectas"),
     }
 }

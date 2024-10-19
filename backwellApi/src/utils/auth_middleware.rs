@@ -1,21 +1,34 @@
-use actix_web::{dev::ServiceRequest, Error};
+// src/utils/auth_middleware.rs
+
+use actix_web::dev::{ServiceRequest, ServiceResponse, Transform};
+use actix_web::{Error, HttpMessage, HttpResponse};
 use actix_web::error::ErrorUnauthorized;
-use actix_web_httpauth::extractors::bearer::BearerAuth;
-use futures::future::{ok, Ready};
-use actix_service::{Service, Transform};
-use std::task::{Context, Poll};
-use std::pin::Pin;
+use futures::future::{ok, Ready, LocalBoxFuture};
+use futures::FutureExt;
 use crate::utils::auth::verify_jwt;
+use serde::{Deserialize, Serialize};
+
+pub struct AuthorizedUser {
+    pub user_id: String,
+}
 
 pub struct AuthMiddleware;
 
+pub fn auth_middleware() -> AuthMiddleware {
+    AuthMiddleware
+}
+
 impl<S, B> Transform<S, ServiceRequest> for AuthMiddleware
 where
-    S: Service<ServiceRequest, Response = actix_web::dev::ServiceResponse<B>, Error = Error> + 'static,
+    S: actix_service::Service<
+        ServiceRequest,
+        Response = ServiceResponse<B>,
+        Error = Error,
+    >,
     S::Future: 'static,
     B: 'static,
 {
-    type Response = actix_web::dev::ServiceResponse<B>;
+    type Response = ServiceResponse<B>;
     type Error = Error;
     type InitError = ();
     type Transform = AuthMiddlewareService<S>;
@@ -30,37 +43,54 @@ pub struct AuthMiddlewareService<S> {
     service: S,
 }
 
-impl<S, B> Service<ServiceRequest> for AuthMiddlewareService<S>
+impl<S, B> actix_service::Service<ServiceRequest> for AuthMiddlewareService<S>
 where
-    S: Service<ServiceRequest, Response = actix_web::dev::ServiceResponse<B>, Error = Error> + 'static,
+    S: actix_service::Service<
+        ServiceRequest,
+        Response = ServiceResponse<B>,
+        Error = Error,
+    >,
     S::Future: 'static,
     B: 'static,
 {
-    type Response = actix_web::dev::ServiceResponse<B>;
+    type Response = ServiceResponse<B>;
     type Error = Error;
-    type Future = Pin<Box<dyn futures::Future<Output = Result<Self::Response, Self::Error>>>>;
+    type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&self, ctx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(
+        &self,
+        ctx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
         self.service.poll_ready(ctx)
     }
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
-        let headers = req.headers();
-        if let Some(auth_header) = headers.get("Authorization") {
-            if let Ok(auth_str) = auth_header.to_str() {
-                if auth_str.starts_with("Bearer ") {
-                    let token = auth_str.trim_start_matches("Bearer ");
-                    if verify_jwt(token).is_ok() {
-                        let fut = self.service.call(req);
-                        return Box::pin(async move {
-                            let res = fut.await?;
-                            Ok(res)
+        let headers = req.headers().clone();
+
+        let auth_header = headers.get("Authorization").and_then(|h| h.to_str().ok());
+
+        if let Some(auth_header) = auth_header {
+            if auth_header.starts_with("Bearer ") {
+                let token = auth_header.trim_start_matches("Bearer ").trim();
+
+                match verify_jwt(token) {
+                    Ok(claims) => {
+                        // Adjuntar el usuario autorizado al request
+                        req.extensions_mut().insert(AuthorizedUser {
+                            user_id: claims.sub,
                         });
+                        let fut = self.service.call(req);
+                        return async move { fut.await }.boxed_local();
+                    }
+                    Err(_) => {
+                        let res = HttpResponse::Unauthorized().body("Token inválido o expirado");
+                        return async move { Err(ErrorUnauthorized(res)) }.boxed_local();
                     }
                 }
             }
         }
 
-        Box::pin(async { Err(ErrorUnauthorized("No autorizado")) })
+        let res = HttpResponse::Unauthorized().body("No autorizado");
+        async move { Err(ErrorUnauthorized(res)) }.boxed_local()
     }
 }

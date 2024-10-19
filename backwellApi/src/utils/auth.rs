@@ -1,12 +1,15 @@
-use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey, TokenData};
-use serde::{Serialize, Deserialize};
+// src/utils/auth.rs
+
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use serde::{Deserialize, Serialize};
 use std::env;
 use chrono::{Utc, Duration};
+use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
-    pub sub: String, // subject (user id)
-    pub exp: usize,  // expiration time
+    pub sub: String, // Subject (user ID)
+    pub exp: usize,  // Expiration time
 }
 
 pub fn create_jwt(user_id: &str) -> Result<String, jsonwebtoken::errors::Error> {
@@ -28,11 +31,13 @@ pub fn create_jwt(user_id: &str) -> Result<String, jsonwebtoken::errors::Error> 
     )
 }
 
-pub fn verify_jwt(token: &str) -> Result<TokenData<Claims>, jsonwebtoken::errors::Error> {
+pub fn verify_jwt(token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
     let secret = env::var("JWT_SECRET").unwrap_or_else(|_| "mysecret".into());
-    decode::<Claims>(
+    let token_data = decode::<Claims>(
         token,
         &DecodingKey::from_secret(secret.as_ref()),
-        &Validation::default(),
-    )
+        &Validation::new(Algorithm::HS256),
+    )?;
+
+    Ok(token_data.claims)
 }

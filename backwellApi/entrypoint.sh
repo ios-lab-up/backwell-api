@@ -1,18 +1,19 @@
-#!/bin/sh
+#!/bin/bash
 
-set -e
+echo "Waiting for PostgreSQL to be ready..."
 
-# Esperar a que la base de datos esté lista
-echo "Esperando a que PostgreSQL esté listo..."
+# Wait for PostgreSQL to be ready
 until pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER"; do
+  >&2 echo "Postgres is unavailable - sleeping"
   sleep 1
 done
-echo "PostgreSQL está listo."
 
-# Ejecutar migraciones
-echo "Ejecutando migraciones..."
-/usr/local/bin/backwellApi migrate || { echo 'Error al ejecutar migraciones'; exit 1; }
+echo "PostgreSQL is ready."
 
-# Iniciar la aplicación
-echo "Iniciando la aplicación..."
-exec /usr/local/bin/backwellApi || { echo 'Error al iniciar la aplicación'; exit 1; }
+# Run migrations
+echo "Running migrations..."
+diesel migration run
+
+# Start the application
+echo "Starting the application..."
+exec backwellApi

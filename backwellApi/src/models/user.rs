@@ -1,7 +1,20 @@
-use serde::{Serialize, Deserialize};
+// src/models/user.rs
+
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use diesel::prelude::*;
-use crate::schema::users;
+
+// Definir manualmente la tabla users
+table! {
+    users (id) {
+        id -> Uuid,
+        name -> Varchar,
+        email -> Varchar,
+        username -> Varchar,
+        password -> Varchar,
+        is_staff -> Bool,
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Insertable)]
 #[diesel(table_name = users)]
