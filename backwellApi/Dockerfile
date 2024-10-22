@@ -1,45 +1,65 @@
-# Stage 1: Build the application
+# =========================
+# Stage 1: Builder
+# =========================
 FROM rust:1.81-slim-bullseye AS builder
-
-WORKDIR /app
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
     libpq-dev \
-    build-essential
+    build-essential \
+    pkg-config
 
-# Copy project files
+# Install diesel_cli
+RUN cargo install diesel_cli --no-default-features --features postgres
+
+# Create a new directory for the application
+WORKDIR /app
+
+# Copy Cargo.toml and Cargo.lock to leverage Docker caching
 COPY Cargo.toml Cargo.lock ./
-COPY src ./src
-COPY migrations ./migrations
-COPY entrypoint.sh ./entrypoint.sh
-COPY .env .env
 
-# Build the application
+# Build dependencies only (this step is cached unless Cargo.toml or Cargo.lock changes)
+RUN mkdir src
+RUN echo "fn main() {}" > src/main.rs
+RUN cargo build --release
+RUN rm -rf src
+
+# Copy the actual source code and other necessary files
+COPY . .
+
+# Build the actual application (this step will re-run when source code changes)
 RUN cargo build --release
 
-# Stage 2: Create the final image
+# =========================
+# Stage 2: Runtime
+# =========================
 FROM debian:bullseye-slim
-
-WORKDIR /app
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
     libpq5 \
     ca-certificates \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy the built binary and other necessary files
-COPY --from=builder /app/target/release/backwellApi /usr/local/bin/
+# Set the working directory
+WORKDIR /app
+
+# Copy the compiled binary from the builder stage
+COPY --from=builder /app/target/release/backwellApi /usr/local/bin/backwellApi
+
+# Copy the diesel binary from the builder stage
+COPY --from=builder /usr/local/cargo/bin/diesel /usr/local/bin/diesel
+
+# Copy other necessary files
 COPY --from=builder /app/entrypoint.sh /app/entrypoint.sh
 COPY --from=builder /app/migrations ./migrations
-COPY --from=builder /app/.env .env
 
-# Give execute permission to the entrypoint script
+# Ensure the entrypoint script has execute permissions
 RUN chmod +x /app/entrypoint.sh
 
-# Expose the port
+# Expose the application port (adjust if your app uses a different port)
 EXPOSE 8080
 
-# Set the entrypoint
+# Define the entrypoint
 ENTRYPOINT ["/app/entrypoint.sh"]
