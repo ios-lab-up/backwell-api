@@ -1,39 +1,142 @@
 // src/main.rs
 
-use actix_web::{web, App, HttpServer};
-use dotenvy::dotenv;
+use actix_web::{web, App, HttpServer, HttpResponse, Responder};
+use serde::{Deserialize, Serialize};
+use reqwest::Client;
+use log::{info, error};
 use std::env;
-use diesel::r2d2::{self, ConnectionManager};
-use diesel::PgConnection;
 
-mod handlers;
-mod models;
-mod routes;
-mod utils;
-mod schema;
+mod schedule_utils;
+
+#[derive(Deserialize)]
+struct GenerateScheduleRequest {
+    courses: Vec<String>,
+    minimum: usize,
+}
+
+#[derive(Serialize)]
+struct GenerateScheduleResponse {
+    schedule_groups: Vec<Vec<CourseSchedule>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct CourseSchedule {
+    id: i32,
+    materia: Materia,
+    profesor: Profesor,
+    salon: Salon,
+    id_del_curso: i32,
+    ciclo: i32,
+    sesion: String,
+    mat_comb: i32,
+    clases_comb: String,
+    capacidad_inscripcion_combinacion: i32,
+    no_de_catalogo: String,
+    clase: String,
+    no_de_clase: i32,
+    capacidad_inscripcion: i32,
+    total_inscripciones: i32,
+    total_inscripciones_materia_combinada: i32,
+    fecha_inicial: String,
+    fecha_final: String,
+    capacidad_del_salon: i32,
+    hora_inicio: String,
+    hora_fin: String,
+    lunes: bool,
+    martes: bool,
+    miercoles: bool,
+    jueves: bool,
+    viernes: bool,
+    sabado: bool,
+    domingo: bool,
+    bloque_optativo: String,
+    idioma_impartido: Option<String>,
+    modalidad_clase: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct Materia {
+    id: i32,
+    codigo: String,
+    nombre: String,
+    no_de_catalogo: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct Profesor {
+    id: i32,
+    nombre: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct Salon {
+    id: i32,
+    nombre: String,
+    capacidad: i32,
+}
+// Handler for generating schedules
+async fn generate_schedule(req_body: web::Json<GenerateScheduleRequest>) -> impl Responder {
+    // Fetch data from the Django API
+    let client = Client::builder()
+        .use_rustls_tls()
+        .build()
+        .expect("Failed to build HTTP client");
+
+    // Replace with your actual Django API URL
+    let django_api_url = env::var("DJANGO_API_URL").unwrap_or_else(|_| "http://localhost:8001/api/cursos/".to_string());
+
+    let response = client.get(&django_api_url)
+        .send()
+        .await;
+
+    let courses_data: Vec<CourseSchedule> = match response {
+        Ok(resp) => {
+            match resp.json().await {
+                Ok(data) => data,
+                Err(err) => {
+                    error!("Error parsing response from Django API: {}", err);
+                    return HttpResponse::InternalServerError()
+                        .body(format!("Error parsing response from Django API: {}", err));
+                }
+            }
+        },
+        Err(err) => {
+            error!("Error fetching data from Django API: {}", err);
+            return HttpResponse::InternalServerError()
+                .body(format!("Error fetching data from Django API: {}", err));
+        }
+    };
+
+    // Process the data to create compatible schedules
+    let compatible_schedules = schedule_utils::create_compatible_schedules(
+        &courses_data,
+        &req_body.courses,
+        req_body.minimum,
+    );
+
+    // Prepare the response
+    let response = GenerateScheduleResponse {
+        schedule_groups: compatible_schedules,
+    };
+
+    HttpResponse::Ok().json(response)
+}
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    // Load environment variables from .env
-    dotenv().ok();
+    // Initialize logger
+    env_logger::init();
 
-    // Get the database URL from environment variables
-    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-
-    // Create the database connection pool
-    let manager = ConnectionManager::<PgConnection>::new(database_url);
-    let pool = r2d2::Pool::builder()
-        .build(manager)
-        .expect("Failed to create pool.");
+    // Set the server port
+    let port = 8082;
 
     // Start the HTTP server
-    println!("Starting server at http://0.0.0.0:8080");
-    HttpServer::new(move || {
+    info!("Starting server at http://0.0.0.0:{}", port);
+    HttpServer::new(|| {
         App::new()
-            .app_data(web::Data::new(pool.clone())) // Add the pool to the application data
-            .configure(routes::init_routes) // Configure routes
+            .route("/generate_schedule", web::post().to(generate_schedule))
     })
-    .bind(("0.0.0.0", 8080))?
+    .bind(("0.0.0.0", port))?
     .run()
     .await
 }

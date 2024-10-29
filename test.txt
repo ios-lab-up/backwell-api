@@ -1,0 +1,404 @@
+[package]
+name = "backwellApi"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+actix-web = "4.3.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+reqwest = { version = "0.11", features = ["json"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+chrono = { version = "0.4", features = ["serde"] }
+petgraph = "0.5.1"
+env_logger = "0.9"
+log = "0.4"
+
+version: "3.9"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rust_app
+    environment:
+      - RUST_BACKTRACE=1
+    ports:
+      - "8082:8082"
+    networks:
+      - app_network
+
+networks:
+  app_network:
+    driver: bridge
+
+# Use Rust as the builder image
+FROM rust:1.81-slim-bullseye AS builder
+
+# Install necessary packages
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy the manifest and lock files and create a dummy src folder for dependency caching
+COPY Cargo.toml Cargo.lock ./
+RUN mkdir src && echo "fn main() {}" > src/main.rs
+
+# Build dependencies
+RUN cargo build --release
+
+# Copy the rest of the source files and build the actual app
+COPY . .
+RUN cargo build --release
+
+# Use a smaller image to run the application
+FROM debian:bullseye-slim
+
+# Install the necessary libraries for the compiled application
+RUN apt-get update && apt-get install -y \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY --from=builder /app/target/release/backwellApi /usr/local/bin/backwellApi
+
+# Run the application
+CMD ["/usr/local/bin/backwellApi"]
+
+// src/schedule_utils.rs
+
+use crate::{CourseSchedule};
+use chrono::{NaiveTime};
+use petgraph::Graph;
+use petgraph::algo::clique;
+use std::collections::{HashMap, HashSet};
+
+pub fn create_compatible_schedules(
+    all_schedules: &Vec<CourseSchedule>,
+    course_names: &Vec<String>,
+    _minimum: usize,
+) -> Vec<Vec<CourseSchedule>> {
+    // Filter schedules for the requested courses
+    let filtered_schedules: Vec<&CourseSchedule> = all_schedules.iter()
+        .filter(|s| course_names.contains(&s.materia.nombre.trim().to_string()))
+        .collect();
+
+    // Group schedules by course and professor
+    let mut grouped_schedules: HashMap<(i32, i32), Vec<&CourseSchedule>> = HashMap::new();
+    for schedule in filtered_schedules {
+        let key = (schedule.materia.id, schedule.profesor.id);
+        grouped_schedules.entry(key).or_insert(Vec::new()).push(schedule);
+    }
+
+    // Build the graph
+    let mut graph = Graph::<(i32, i32), ()>::new_undirected();
+    let mut node_indices = HashMap::new();
+
+    for &key in grouped_schedules.keys() {
+        let index = graph.add_node(key);
+        node_indices.insert(key, index);
+    }
+
+    // Add edges between non-overlapping schedules
+    let keys: Vec<(i32, i32)> = grouped_schedules.keys().cloned().collect();
+    for i in 0..keys.len() {
+        for j in (i+1)..keys.len() {
+            let key_i = keys[i];
+            let key_j = keys[j];
+            if !schedules_overlap(&grouped_schedules[&key_i], &grouped_schedules[&key_j]) {
+                let index_i = node_indices[&key_i];
+                let index_j = node_indices[&key_j];
+                graph.add_edge(index_i, index_j, ());
+            }
+        }
+    }
+
+    // Find cliques
+    let cliques = clique::find_cliques(&graph);
+
+    // Collect schedules from cliques
+    let mut final_schedules = Vec::new();
+    for clique in cliques {
+        let mut schedule_group = Vec::new();
+        for node_index in clique {
+            let key = graph[node_index];
+            let schedules = grouped_schedules[&key].clone();
+            schedule_group.extend(schedules.into_iter().cloned());
+        }
+        final_schedules.push(schedule_group);
+    }
+
+    final_schedules
+}
+
+// Rest of the code remains the same...
+
+fn schedules_overlap(schedules1: &Vec<&CourseSchedule>, schedules2: &Vec<&CourseSchedule>) -> bool {
+    for s1 in schedules1 {
+        for s2 in schedules2 {
+            let days1 = get_days(s1);
+            let days2 = get_days(s2);
+
+            let common_days: HashSet<&str> = days1.intersection(&days2).cloned().collect();
+            if !common_days.is_empty() {
+                let start_time1 = NaiveTime::parse_from_str(&s1.hora_inicio, "%H:%M:%S").unwrap();
+                let end_time1 = NaiveTime::parse_from_str(&s1.hora_fin, "%H:%M:%S").unwrap();
+                let start_time2 = NaiveTime::parse_from_str(&s2.hora_inicio, "%H:%M:%S").unwrap();
+                let end_time2 = NaiveTime::parse_from_str(&s2.hora_fin, "%H:%M:%S").unwrap();
+
+                if (start_time1 < end_time2) && (end_time1 > start_time2) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+fn get_days(schedule: &CourseSchedule) -> HashSet<&str> {
+    let mut days = HashSet::new();
+    if schedule.lunes { days.insert("L"); }
+    if schedule.martes { days.insert("M"); }
+    if schedule.miercoles { days.insert("W"); }
+    if schedule.jueves { days.insert("J"); }
+    if schedule.viernes { days.insert("V"); }
+    if schedule.sabado { days.insert("S"); }
+    if schedule.domingo { days.insert("D"); }
+    days
+}
+
+
+unresolved import `petgraph::algo::clique`
+no `clique` in `algo`rustcClick for full compiler diagnostic
+petgraph
+mod algo
+Graph algorithms.
+
+It is a goal to gradually migrate the algorithms to be based on graph traits so that they are generally applicable. For now, some of these still require the Graph type.
+
+no function or associated item named `new_undirected` found for struct `Graph<(i32, i32), ()>` in the current scope
+the function or associated item was found for
+- `Graph<N, E, Undirected>`rustcClick for full compiler diagnostic
+mod.rs(444, 5): if you're trying to build a new `Graph<(i32, i32), ()>` consider using one of the following associated functions:
+Graph::<N, E>::new
+Graph::<N, E, Ty, Ix>::with_capacity
+Graph::<N, E, Ty, Ix>::from_edges
+schedule_utils.rs(27, 46): there is a method `is_directed` with a similar name: `is_directed`
+
+
+main.rs
+// src/main.rs
+
+use actix_web::{web, App, HttpServer, HttpResponse, Responder};
+use serde::{Deserialize, Serialize};
+use reqwest::Client;
+use std::env;
+use log::info;
+
+mod schedule_utils;
+
+#[derive(Deserialize)]
+struct GenerateScheduleRequest {
+    courses: Vec<String>,
+    minimum: usize,
+}
+
+#[derive(Serialize)]
+struct GenerateScheduleResponse {
+    schedule_groups: Vec<Vec<CourseSchedule>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct CourseSchedule {
+    id: i32,
+    materia: Materia,
+    profesor: Profesor,
+    salon: Salon,
+    id_del_curso: i32,
+    ciclo: i32,
+    sesion: String,
+    mat_comb: i32,
+    clases_comb: String,
+    capacidad_inscripcion_combinacion: i32,
+    no_de_catalogo: String,
+    clase: String,
+    no_de_clase: i32,
+    capacidad_inscripcion: i32,
+    total_inscripciones: i32,
+    total_inscripciones_materia_combinada: i32,
+    fecha_inicial: String,
+    fecha_final: String,
+    capacidad_del_salon: i32,
+    hora_inicio: String,
+    hora_fin: String,
+    lunes: bool,
+    martes: bool,
+    miercoles: bool,
+    jueves: bool,
+    viernes: bool,
+    sabado: bool,
+    domingo: bool,
+    bloque_optativo: String,
+    idioma_impartido: Option<String>,
+    modalidad_clase: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct Materia {
+    id: i32,
+    codigo: String,
+    nombre: String,
+    no_de_catalogo: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct Profesor {
+    id: i32,
+    nombre: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct Salon {
+    id: i32,
+    nombre: String,
+    capacidad: i32,
+}
+
+// Handler for generating schedules
+async fn generate_schedule(req_body: web::Json<GenerateScheduleRequest>) -> impl Responder {
+    // Fetch data from the Django API
+    let client = Client::new();
+
+    // Replace with your actual Django API URL
+    let django_api_url = "http://django_api_url/api/cursos/";
+
+    let response = client.get(django_api_url)
+        .send()
+        .await;
+
+    let courses_data: Vec<CourseSchedule> = match response {
+        Ok(resp) => {
+            match resp.json().await {
+                Ok(data) => data,
+                Err(err) => {
+                    return HttpResponse::InternalServerError()
+                        .body(format!("Error parsing response from Django API: {}", err));
+                }
+            }
+        },
+        Err(err) => {
+            return HttpResponse::InternalServerError()
+                .body(format!("Error fetching data from Django API: {}", err));
+        }
+    };
+
+    // Process the data to create compatible schedules
+    let compatible_schedules = schedule_utils::create_compatible_schedules(
+        &courses_data,
+        &req_body.courses,
+        req_body.minimum,
+    );
+
+    // Prepare the response
+    let response = GenerateScheduleResponse {
+        schedule_groups: compatible_schedules,
+    };
+
+    HttpResponse::Ok().json(response)
+}
+
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    // Initialize logger
+    env_logger::init();
+
+    // Set the server port
+    let port = 8082;
+
+    // Start the HTTP server
+    info!("Starting server at http://0.0.0.0:{}", port);
+    HttpServer::new(|| {
+        App::new()
+            .route("/generate_schedule", web::post().to(generate_schedule))
+    })
+    .bind(("0.0.0.0", port))?
+    .run()
+    .await
+}
+
+Consider this improvemnts
+
+To resolve the issues in your Rust project with `petgraph`, here's an update on dependencies and code modifications to enhance functionality and compatibility.
+
+### 1. **Updating `petgraph` Version**
+   It appears that `petgraph` no longer includes the `clique` function in its `algo` module. You can implement cliques using `petgraph` by exploring alternative approaches, like using `all_simple_paths` or `min_spanning_tree` for specific graph traversals. However, if exact cliques are critical, you might consider implementing a custom clique algorithm using depth-first search.
+
+### 2. **Fixing `Graph` Initialization**
+   The `new_undirected` method is no longer directly accessible. Instead, use the shorthand type `UnGraph` for undirected graphs or initialize `Graph` with the `Undirected` type parameter explicitly:
+   ```rust
+   use petgraph::graph::{Graph, UnGraph};
+   
+   let mut graph: Graph<(i32, i32), (), petgraph::Undirected> = Graph::new_undirected();
+   ```
+
+### 3. **Dependency Version Compatibility**
+   Your dependencies largely align well with recent versions, but here are some specific suggestions:
+   - **`tokio`**: Version `1.30` is stable and backward-compatible, and you can use it with features `macros` and `rt-multi-thread`.
+   - **`serde`**: Keep at `1.0` with `derive` for compatibility.
+   - **`chrono`**: If you encounter errors with `serde`, updating to `0.4.27` (with the `serde` feature) should resolve compatibility issues.
+   - **`actix-web`**: Version `4.3.1` is stable; ensure your other dependencies don’t conflict with it.
+
+### 4. **Dockerfile Adjustments**
+   Add the `pkg-config` and `libssl-dev` packages, then check for dependency builds with `cargo update`. Here’s the corrected Dockerfile:
+   ```Dockerfile
+   FROM rust:1.81-slim-bullseye AS builder
+
+   RUN apt-get update && apt-get install -y \
+       pkg-config \
+       libssl-dev \
+       ca-certificates \
+       && rm -rf /var/lib/apt/lists/*
+
+   WORKDIR /app
+
+   COPY Cargo.toml Cargo.lock ./
+   RUN mkdir src && echo "fn main() {}" > src/main.rs
+   RUN cargo build --release
+
+   COPY . .
+   RUN cargo build --release
+
+   FROM debian:bullseye-slim
+   RUN apt-get update && apt-get install -y libssl-dev && rm -rf /var/lib/apt/lists/*
+
+   WORKDIR /app
+   COPY --from=builder /app/target/release/backwellApi /usr/local/bin/backwellApi
+   CMD ["/usr/local/bin/backwellApi"]
+   ```
+
+### 5. **Revised `Cargo.toml`**
+   Here’s an updated `Cargo.toml`:
+   ```toml
+   [package]
+   name = "backwellApi"
+   version = "0.1.0"
+   edition = "2021"
+
+   [dependencies]
+   actix-web = "4.3.1"
+   serde = { version = "1.0", features = ["derive"] }
+   serde_json = "1.0"
+   reqwest = { version = "0.11", features = ["json"] }
+   tokio = { version = "1.30", features = ["macros", "rt-multi-thread"] }
+   chrono = { version = "0.4.27", features = ["serde"] }
+   petgraph = { version = "0.6.5", features = ["serde-1"] }
+   env_logger = "0.9"
+   log = "0.4"
+   ```
+
+Let me know if you’d like further help with custom clique implementation or additional project optimizations!
