@@ -3,7 +3,6 @@
 use crate::CourseSchedule;
 use chrono::NaiveTime;
 use petgraph::graph::{Graph, NodeIndex};
-use petgraph::visit::EdgeRef;
 use petgraph::Undirected;
 use std::collections::{HashMap, HashSet};
 

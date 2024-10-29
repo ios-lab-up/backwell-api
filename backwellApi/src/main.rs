@@ -83,7 +83,7 @@ async fn generate_schedule(req_body: web::Json<GenerateScheduleRequest>) -> impl
         .expect("Failed to build HTTP client");
 
     // Replace with your actual Django API URL
-    let django_api_url = env::var("DJANGO_API_URL").unwrap_or_else(|_| "http://localhost:8001/api/cursos/".to_string());
+    let django_api_url = env::var("DJANGO_API_URL").unwrap_or_else(|_| "http://127.0.0.1:8001/api/cursos/".to_string());
 
     let response = client.get(&django_api_url)
         .send()
@@ -123,7 +123,7 @@ async fn generate_schedule(req_body: web::Json<GenerateScheduleRequest>) -> impl
 }
 
 #[actix_web::main]
-async fn main() -> std::io::Result<()> {
+async fn main() {
     // Initialize logger
     env_logger::init();
 
@@ -132,11 +132,22 @@ async fn main() -> std::io::Result<()> {
 
     // Start the HTTP server
     info!("Starting server at http://0.0.0.0:{}", port);
-    HttpServer::new(|| {
+
+    // Attempt to bind and run the server, logging any errors
+    let server = HttpServer::new(|| {
         App::new()
             .route("/generate_schedule", web::post().to(generate_schedule))
     })
-    .bind(("0.0.0.0", port))?
-    .run()
-    .await
+    .bind(("0.0.0.0", port));
+
+    match server {
+        Ok(srv) => {
+            if let Err(e) = srv.run().await {
+                error!("Server encountered an error while running: {}", e);
+            }
+        }
+        Err(e) => {
+            error!("Failed to bind to port {}: {}", port, e);
+        }
+    }
 }

@@ -35,5 +35,5 @@ COPY --from=builder /app/target/release/backwellApi /usr/local/bin/backwellApi
 # Expose the application port
 EXPOSE 8082
 
-# Run the application
-CMD ["/usr/local/bin/backwellApi"]
+# Run the application using a shell to capture any errors
+ENTRYPOINT ["/bin/sh", "-c", "/usr/local/bin/backwellApi"]
