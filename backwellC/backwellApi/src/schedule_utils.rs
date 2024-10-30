@@ -6,6 +6,17 @@ use petgraph::graph::{Graph, NodeIndex};
 use petgraph::Undirected;
 use std::collections::{HashMap, HashSet};
 
+/// Creates compatible schedules from a list of all schedules and a list of course names.
+/// 
+/// # Arguments
+/// 
+/// * `all_schedules` - A vector of all course schedules.
+/// * `course_names` - A vector of course names to filter schedules.
+/// * `_minimum` - A minimum number of schedules (currently unused).
+/// 
+/// # Returns
+/// 
+/// A vector of vectors, where each inner vector represents a group of compatible schedules.
 pub fn create_compatible_schedules(
     all_schedules: &Vec<CourseSchedule>,
     course_names: &Vec<String>,
@@ -27,6 +38,7 @@ pub fn create_compatible_schedules(
     let mut graph = Graph::<(i32, i32), (), Undirected>::default();
     let mut node_indices = HashMap::new();
 
+    // Add nodes to the graph
     for &key in grouped_schedules.keys() {
         let index = graph.add_node(key);
         node_indices.insert(key, index);
@@ -68,6 +80,15 @@ pub fn create_compatible_schedules(
     final_schedules
 }
 
+/// Bron-Kerbosch algorithm to find all maximal cliques in an undirected graph.
+/// 
+/// # Arguments
+/// 
+/// * `graph` - The graph to search for cliques.
+/// * `r` - Current clique.
+/// * `p` - Potential nodes to add to the clique.
+/// * `x` - Nodes already processed.
+/// * `cliques` - Collection of found cliques.
 fn bron_kerbosch(
     graph: &Graph<(i32, i32), (), Undirected>,
     r: &mut Vec<NodeIndex>,
@@ -92,6 +113,16 @@ fn bron_kerbosch(
     }
 }
 
+/// Checks if two sets of schedules overlap.
+/// 
+/// # Arguments
+/// 
+/// * `schedules1` - First set of schedules.
+/// * `schedules2` - Second set of schedules.
+/// 
+/// # Returns
+/// 
+/// `true` if there is an overlap, `false` otherwise.
 fn schedules_overlap(schedules1: &Vec<&CourseSchedule>, schedules2: &Vec<&CourseSchedule>) -> bool {
     for s1 in schedules1 {
         for s2 in schedules2 {
@@ -114,6 +145,15 @@ fn schedules_overlap(schedules1: &Vec<&CourseSchedule>, schedules2: &Vec<&Course
     false
 }
 
+/// Extracts the days of the week from a schedule.
+/// 
+/// # Arguments
+/// 
+/// * `schedule` - The schedule to extract days from.
+/// 
+/// # Returns
+/// 
+/// A set of strings representing the days of the week.
 fn get_days(schedule: &CourseSchedule) -> HashSet<&str> {
     let mut days = HashSet::new();
     if schedule.lunes { days.insert("L"); }
