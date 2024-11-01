@@ -154,15 +154,17 @@ fn simplify_schedules(schedules: &Vec<Vec<CourseSchedule>>) -> HashMap<String, H
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     env_logger::init();
-
     let port = 8082;
-    info!("Starting server at http://0.0.0.0:{}", port);
+    info!("Iniciando servidor en http://0.0.0.0:{}", port);
 
     HttpServer::new(|| {
         App::new()
-            .route("/generate_schedule", web::post().to(generate_schedule))
+            .route("/v1/api/generate", web::post().to(generate_schedule))
     })
     .bind(("0.0.0.0", port))?
     .run()
-    .await
+    .await?;
+
+    info!("Servidor Actix finalizado"); // Debe mantenerse activo
+    Ok(())
 }
