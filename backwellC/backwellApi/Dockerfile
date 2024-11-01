@@ -1,7 +1,9 @@
-# Use Rust as the builder image
+# backwellApi/Dockerfile
+
+# Etapa de construcción
 FROM rust:1.81-slim-bullseye AS builder
 
-# Install necessary packages
+# Instalar paquetes necesarios
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
@@ -10,30 +12,30 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy the manifest and lock files and create a dummy src folder for dependency caching
+# Copiar archivos de dependencia y crear un archivo main.rs temporal
 COPY Cargo.toml Cargo.lock ./
 RUN mkdir src && echo "fn main() {}" > src/main.rs
 
-# Build dependencies
+# Compilar dependencias
 RUN cargo build --release
 
-# Copy the rest of the source files and build the actual app
+# Copiar el código fuente y compilar la aplicación real
 COPY . .
 RUN cargo build --release
 
-# Use a smaller image to run the application
+# Etapa final
 FROM debian:bullseye-slim
 
-# Install the necessary libraries for the compiled application
-RUN apt-get update && apt-get install -y ca-certificates\
+# Instalar librerías necesarias
+RUN apt-get update && apt-get install -y ca-certificates \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY --from=builder /app/target/release/backwellApi /usr/local/bin/backwellApi
 
-# Expose the application port
+# Exponer el puerto de la aplicación
 EXPOSE 8082
 
-# Run the application using a shell to capture any errors
-ENTRYPOINT ["/bin/sh", "-c", "/usr/local/bin/backwellApi"]
+# Ejecutar la aplicación
+ENTRYPOINT ["/usr/local/bin/backwellApi"]

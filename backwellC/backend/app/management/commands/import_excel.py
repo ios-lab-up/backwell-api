@@ -1,7 +1,6 @@
 import pandas as pd
 from django.core.management.base import BaseCommand
-from app.models import Materia, Profesor, Salon, Curso
-from django.utils import timezone
+from app.models import Materia, Profesor, Salon, Curso, Schedule
 from datetime import datetime
 import os
 from django.conf import settings
@@ -20,68 +19,102 @@ class Command(BaseCommand):
             except Exception as e:
                 self.stdout.write(self.style.ERROR(f"Error al leer el archivo Excel: {e}"))
                 return
-            # Procesa cada fila del DataFrame
-            for index, row in df.iterrows():
-                # Crear o obtener el profesor
-                profesor, _ = Profesor.objects.get_or_create(nombre=row['Profesor'])
 
-                # Crear o obtener el salón
-                salon, _ = Salon.objects.get_or_create(nombre=row['Salón'], defaults={'capacidad': row['Capacidad del salón']})
+            # Imprimir los nombres de las columnas para verificar
+            print("Columnas del DataFrame:", df.columns.tolist())
 
-                # Crear o obtener la materia
-                materia_obj, _ = Materia.objects.get_or_create(
-                    codigo=row['Materia'],
+            # Preprocesar el DataFrame
+            df.fillna('', inplace=True)
+
+            # Agrupar por 'No de clase' y 'Profesor'
+            grouped = df.groupby(['No de clase', 'Profesor'])
+            for (no_de_clase, profesor_nombre), group in grouped:
+                profesor_nombre = profesor_nombre.strip()
+                profesor, _ = Profesor.objects.get_or_create(nombre=profesor_nombre)
+
+                materia_nombre = group['Clase'].iloc[0].strip()
+                materia, _ = Materia.objects.get_or_create(
+                    nombre=materia_nombre,
                     defaults={
-                        'nombre': row['Clase'],
-                        'no_de_catalogo': row['No de catálogo']
+                        'no_de_catalogo': group['No de catálogo'].iloc[0],
+                        'codigo': group['Materia'].iloc[0]
                     }
                 )
 
-                # Convertir campos de fecha y hora
-                fecha_inicial = datetime.strptime(str(row['Fecha inicial']), '%Y-%m-%d')
-                fecha_final = datetime.strptime(str(row['Fecha final']), '%Y-%m-%d')
-                hora_inicio = datetime.strptime(str(row['Hora inicio']), '%I:%M %p').time()
-                hora_fin = datetime.strptime(str(row['Hora fin']), '%I:%M %p').time()
+                # Verificar si la columna 'Idioma en que se imparte la materia' existe
+                if 'Idioma en que se imparte la materia' in group.columns:
+                    idioma_impartido = group['Idioma en que se imparte la materia '].iloc[0]
+                else:
+                    idioma_impartido = ''
 
-                # Convertir campos de días de la semana
-                dias = {
-                    'lunes': row['Lunes'] == 'X',
-                    'martes': row['Martes'] == 'X',
-                    'miercoles': row['Miércoles'] == 'X',
-                    'jueves': row['Jueves'] == 'X',
-                    'viernes': row['Viernes'] == 'X',
-                    'sabado': row['Sábado'] == 'X',
-                    'domingo': False  # Siempre vacío
+                curso_data = {
+                    'id_del_curso': group['Id del Curso'].iloc[0],
+                    'ciclo': group['Ciclo'].iloc[0],
+                    'sesion': group['Sesión'].iloc[0],
+                    'materia': materia,
+                    'mat_comb': group['Mat. Comb.'].iloc[0],
+                    'clases_comb': group['Clases Comb.'].iloc[0],
+                    'capacidad_inscripcion_combinacion': group['Capacidad\nInscripción\nCombinación'].iloc[0],
+                    'no_de_catalogo': group['No de catálogo'].iloc[0],
+                    'clase': group['Clase'].iloc[0],
+                    'no_de_clase': no_de_clase,
+                    'capacidad_inscripcion': group['Capacidad Inscripción'].iloc[0],
+                    'total_inscripciones': group['Total  inscripciones'].iloc[0],
+                    'total_inscripciones_materia_combinada': group['Total de inscripciones materia combinada'].iloc[0],
+                    'fecha_inicial': group['Fecha inicial'].iloc[0],
+                    'fecha_final': group['Fecha final'].iloc[0],
+                    'bloque_optativo': group['Bloque optativo'].iloc[0],
+                    'idioma_impartido': idioma_impartido,
+                    'modalidad_clase': group['Modalidad de la clase'].iloc[0],
+                    'profesor': profesor,
                 }
 
-                # Crear el curso
-                Curso.objects.create(
-                    id_del_curso=row['Id del Curso'],
-                    ciclo=row['Ciclo'],
-                    sesion=row['Sesión'],
-                    materia=materia_obj,
-                    mat_comb=row['Mat. Comb.'],
-                    clases_comb=row['Clases Comb.'],
-                    capacidad_inscripcion_combinacion=row['Capacidad\nInscripción\nCombinación'],
-                    no_de_catalogo=row['No de catálogo'],
-                    clase=row['Clase'],
-                    no_de_clase=row['No de clase'],
-                    capacidad_inscripcion=row['Capacidad Inscripción'],
-                    total_inscripciones=row['Total  inscripciones'],
-                    total_inscripciones_materia_combinada=row['Total de inscripciones materia combinada'],
-                    fecha_inicial=fecha_inicial,
-                    fecha_final=fecha_final,
-                    salon=salon,
-                    capacidad_del_salon=salon.capacidad,
-                    hora_inicio=hora_inicio,
-                    hora_fin=hora_fin,
+                curso, created = Curso.objects.get_or_create(
+                    no_de_clase=no_de_clase,
                     profesor=profesor,
-                    bloque_optativo=row['Bloque optativo'],
-                    modalidad_clase=row['Modalidad de la clase'],
-                    **dias
+                    defaults=curso_data
                 )
 
-            self.stdout.write(self.style.SUCCESS('Datos importados exitosamente'))
+                for index, row in group.iterrows():
+                    days = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
+                    for day in days:
+                        if row[day] == 'X':
+                            dia = day
+
+                            # Procesar horas
+                            try:
+                                hora_inicio = datetime.strptime(str(row['Hora inicio']), '%I:%M %p').time()
+                                hora_fin = datetime.strptime(str(row['Hora fin']), '%I:%M %p').time()
+                            except ValueError:
+                                hora_inicio = datetime.strptime(str(row['Hora inicio']), '%H:%M').time()
+                                hora_fin = datetime.strptime(str(row['Hora fin']), '%H:%M').time()
+
+                            # Procesar salón
+                            salon_nombre = row['Salón'].strip()
+                            modalidad_clase = row['Modalidad de la clase'].strip().upper()
+
+                            if modalidad_clase in ['ENLINEA', 'EN LÍNEA']:
+                                salon_nombre = 'En Línea'
+                            elif not salon_nombre:
+                                salon_nombre = 'Sin Asignar'
+
+                            salon, _ = Salon.objects.get_or_create(nombre=salon_nombre, defaults={'capacidad': row['Capacidad del salón']})
+
+                            # Crear horario
+                            schedule, created = Schedule.objects.get_or_create(
+                                curso=curso,
+                                dia=dia,
+                                hora_inicio=hora_inicio,
+                                hora_fin=hora_fin,
+                                salon=salon,
+                                profesor=profesor
+                            )
+
+                # self.stdout.write(self.style.SUCCESS(f'Curso {curso.id_del_curso} importado exitosamente'))
+                # self.stdout.write(self.style.SUCCESS(f'Horarios del curso {schedule} importados exitosamente'))
+
+            self.stdout.write(self.style.SUCCESS('Todos los datos han sido importados exitosamente'))
+
         except Exception as e:
             logger.error(f"Error al importar datos: {e}")
             self.stdout.write(self.style.ERROR(f"Error al importar datos: {e}"))

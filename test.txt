@@ -1,40 +1,701 @@
-Ya que tenemos ambos servicios corriendo en el mismo docker y siendo capaces de consumirse entre si, vamos a continuar con algunas correcciones al código para mejorar los formatos, y respuestas.
+Así esta el proyecto hasta el momento, con la api de rust y de Django en el mismo docker pero al parecer están ocurriendo unos nuevos errores, te mandare el código de nuevo para corregir lo necesario con base en el output de la inicialización:
+Algunos errores a tomar en cuenta son los siguientes:
+La app de rust sale con codigo 0 en ves de esperar las requests como una api normal o como la de django
+En los models de django se observa que schedule tiene la llave foranea de curso pero es curso el que debe de tener la llave foranea schedule indicando que ese es su horario, horario guarda los datos simplificados de el horario de ese curso ya juntado con su numero de clase mostrando como resultado por ejemplo las 3 clases a la semana con sus horarios y dias
+Usa este codigo de django de models antiguo como ejemplo (no lo copies) pero ajusta los detalles para cumplir con la estructura adecuada y mas optima para guardar los cursos y sus horarios que es lo mas importante al tener que hacer la combinacion de esos datos en rust.
 
-En base al siguiente código modificar lo siguiente:
+class Schedule(models.Model):
+    course = models.ForeignKey(
+        Course, on_delete=models.CASCADE)  # Course foreign key
+    professor = models.ForeignKey(
+        Professor, on_delete=models.CASCADE)  # Professor foreign key
+    room = models.ForeignKey(
+        Room, on_delete=models.CASCADE)  # Room foreign key
+
+    start_date = models.DateField()  # Start date of the schedule
+    end_date = models.DateField()  # End date of the schedule
+    start_time = models.TimeField()  # Start time of the schedule
+    end_time = models.TimeField()  # End time of the schedule
+
+    # Constants for days of the week
+    MONDAY = 'L'
+    TUESDAY = 'M'
+    WEDNESDAY = 'W'
+    THURSDAY = 'J'
+    FRIDAY = 'V'
+    SATURDAY = 'S'
+    SUNDAY = 'D'
+    DAY_CHOICES = [
+        (MONDAY, 'Lunes'),
+        (TUESDAY, 'Martes'),
+        (WEDNESDAY, 'Miércoles'),
+        (THURSDAY, 'Jueves'),
+        (FRIDAY, 'Viernes'),
+        (SATURDAY, 'Sábado'),
+        (SUNDAY, 'Domingo'),
+    ]
+    day = models.CharField(max_length=1, choices=DAY_CHOICES)
+
+    ONLINE = 'ENLINEA'
+    IN_PERSON = 'PRESENCIAL'
+    HYBRID = 'HIBRIDO'
+    MODALITY_CHOICES = [
+        (ONLINE, 'En línea'),
+        (IN_PERSON, 'Presencial'),
+        (HYBRID, 'Híbrido'),
+    ]
+    modality = models.CharField(
+        max_length=10,
+        choices=MODALITY_CHOICES,
+        default=IN_PERSON,
+    )
+
+    def __str__(self):
+        return f"{self.course.name}, {self.professor.name}, "
+
+    ~/Doc/iOSLab/backwell-api    rustDev !11 ──── ✔  17:29:53  ─╮
+╰─ tree -I target -I __pycache__                                             ─╯
+.
+├── LICENSE
+├── README.md
+├── backwellC
+│   ├── backend
+│   │   ├── BackWell
+│   │   │   ├── __init__.py
+│   │   │   ├── asgi.py
+│   │   │   ├── settings.py
+│   │   │   ├── urls.py
+│   │   │   └── wsgi.py
+│   │   ├── Dockerfile
+│   │   ├── Schedule.xlsx
+│   │   ├── app
+│   │   │   ├── __init__.py
+│   │   │   ├── admin.py
+│   │   │   ├── apps.py
+│   │   │   ├── filters.py
+│   │   │   ├── management
+│   │   │   │   └── commands
+│   │   │   │       ├── __init__.py
+│   │   │   │       └── import_excel.py
+│   │   │   ├── migrations
+│   │   │   │   ├── 0001_initial.py
+│   │   │   │   └── __init__.py
+│   │   │   ├── models.py
+│   │   │   ├── serializers.py
+│   │   │   ├── tests.py
+│   │   │   ├── urls.py
+│   │   │   └── views.py
+│   │   ├── entrypoint.sh
+│   │   ├── manage.py
+│   │   └── requirements.txt
+│   ├── backwellApi
+│   │   ├── Cargo.lock
+│   │   ├── Cargo.toml
+│   │   ├── Dockerfile
+│   │   ├── src
+│   │   │   ├── main.rs
+│   │   │   └── schedule_utils.rs
+│   │   └── thunder-collection.json
+│   └── docker-compose.yml
+└── test.txt
+
+10 directories, 33 files
+
+docker-compose.yml
+version: '3.9'
+
+services:
+  db:
+    image: postgres:14
+    restart: always
+    environment:
+      POSTGRES_USER: backwell_user
+      POSTGRES_PASSWORD: backwell_password
+      POSTGRES_DB: backwell_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    ports:
+      - "5433:5432"
+
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - "8080:8080"
+
+  web:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: sh -c "./entrypoint.sh"
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8001:8000"
+    depends_on:
+      - db
+    environment:
+      - DEBUG=1
+      - DB_NAME=backwell_db
+      - DB_USER=backwell_user
+      - DB_PASSWORD=backwell_password
+      - DB_HOST=db
+      - DB_PORT=5432
+
+  rust_app:
+    build:
+      context: ./backwellApi
+      dockerfile: Dockerfile
+    container_name: rust_app
+    environment:
+      - RUST_BACKTRACE=1
+      - RUST_LOG=debug
+      - DJANGO_API_URL=http://web:8000/api/cursos/
+    ports:
+      - "8082:8082"
+    depends_on:
+      - web
+
+volumes:
+  postgres_data:
+
+RUST
+Cargo.toml
+[package]
+name = "backwellApi"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+actix-web = "4.3.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+tokio = { version = "1.30", features = ["macros", "rt-multi-thread"] }
+chrono = { version = "0.4.27", features = ["serde"] }
+petgraph = "0.6.5"
+env_logger = "0.9"
+log = "0.4"
+url = "2.2.2"
+
+Dockerfile
+# Use Rust as the builder image
+FROM rust:1.81-slim-bullseye AS builder
+
+# Install necessary packages
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy the manifest and lock files and create a dummy src folder for dependency caching
+COPY Cargo.toml Cargo.lock ./
+RUN mkdir src && echo "fn main() {}" > src/main.rs
+
+# Build dependencies
+RUN cargo build --release
+
+# Copy the rest of the source files and build the actual app
+COPY . .
+RUN cargo build --release
+
+# Use a smaller image to run the application
+FROM debian:bullseye-slim
+
+# Install the necessary libraries for the compiled application
+RUN apt-get update && apt-get install -y ca-certificates\
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY --from=builder /app/target/release/backwellApi /usr/local/bin/backwellApi
+
+# Expose the application port
+EXPOSE 8082
+
+# Run the application using a shell to capture any errors
+ENTRYPOINT ["/bin/sh", "-c", "/usr/local/bin/backwellApi"]
+
+main.rs
+use actix_web::{web, App, HttpServer, HttpResponse, Responder};
+use serde::{Deserialize, Serialize};
+use reqwest::Client;
+use log::{info, error};
+use std::env;
+use url::Url;
+
+mod schedule_utils;
+
+#[derive(Deserialize)]
+struct GenerateScheduleRequest {
+    courses: Vec<String>,
+    minimum: usize,
+}
+
+#[derive(Serialize)]
+struct GenerateScheduleResponse {
+    schedule_groups: Vec<Vec<CourseSchedule>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct CourseSchedule {
+    id: i32,
+    materia: Materia,
+    profesor: Profesor,
+    schedules: Vec<Schedule>, // Lista de horarios
+    id_del_curso: i32,
+    ciclo: i32,
+    sesion: String,
+    mat_comb: i32,
+    clases_comb: String,
+    capacidad_inscripcion_combinacion: i32,
+    no_de_catalogo: String,
+    clase: String,
+    no_de_clase: i32,
+    capacidad_inscripcion: i32,
+    total_inscripciones: i32,
+    total_inscripciones_materia_combinada: i32,
+    fecha_inicial: String,
+    fecha_final: String,
+    bloque_optativo: String,
+    idioma_impartido: Option<String>,
+    modalidad_clase: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct Schedule {
+    id: i32,
+    salon: Salon,
+    profesor: Profesor,
+    dia: String,
+    hora_inicio: String,
+    hora_fin: String,
+    curso: i32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct Materia {
+    id: i32,
+    nombre: String,
+    no_de_catalogo: String,
+    codigo: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct Profesor {
+    id: i32,
+    nombre: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct Salon {
+    id: i32,
+    nombre: String,
+    capacidad: Option<i32>,
+}
+
+// Handler for generating schedules
+async fn generate_schedule(req_body: web::Json<GenerateScheduleRequest>) -> impl Responder {
+    let client = Client::builder()
+        .build()
+        .expect("Failed to build HTTP client");
+
+    let django_api_base_url = env::var("DJANGO_API_URL")
+        .unwrap_or_else(|_| "http://web:8000/api/cursos/".to_string());
+
+    let mut url = Url::parse(&django_api_base_url).expect("Invalid Django API URL");
+    for course_name in &req_body.courses {
+        url.query_pairs_mut()
+            .append_pair("materia__nombre", course_name);
+    }
+
+    let response = client.get(url)
+        .send()
+        .await;
+
+    let courses_data: Vec<CourseSchedule> = match response {
+        Ok(resp) => {
+            match resp.json().await {
+                Ok(data) => data,
+                Err(err) => {
+                    error!("Error parsing response from Django API: {}", err);
+                    return HttpResponse::InternalServerError()
+                        .body(format!("Error parsing response from Django API: {}", err));
+                }
+            }
+        },
+        Err(err) => {
+            error!("Error fetching data from Django API: {}", err);
+            return HttpResponse::InternalServerError()
+                .body(format!("Error fetching data from Django API: {}", err));
+        }
+    };
+
+    let compatible_schedules = schedule_utils::create_compatible_schedules(
+        &courses_data,
+        &req_body.courses,
+        req_body.minimum,
+    );
+
+    let response = GenerateScheduleResponse {
+        schedule_groups: compatible_schedules,
+    };
+
+    HttpResponse::Ok().json(response)
+}
+
+#[actix_web::main]
+async fn main() {
+    env_logger::init();
+
+    let port = 8082;
+    info!("Starting server at http://0.0.0.0:{}", port);
+
+    let server = HttpServer::new(|| {
+        App::new()
+            .route("/generate_schedule", web::post().to(generate_schedule))
+    })
+    .bind(("0.0.0.0", port));
+
+    match server {
+        Ok(srv) => {
+            if let Err(e) = srv.run().await {
+                error!("Server encountered an error while running: {}", e);
+            }
+        }
+        Err(e) => {
+            error!("Failed to bind to port {}: {}", port, e);
+        }
+    }
+}
+
+schedule_utils.rs
+use crate::{CourseSchedule, Schedule};
+use chrono::NaiveTime;
+use petgraph::graph::{Graph, NodeIndex};
+use petgraph::Undirected;
+use std::collections::{HashMap, HashSet};
+
+pub fn create_compatible_schedules(
+    all_courses: &Vec<CourseSchedule>,
+    course_names: &Vec<String>,
+    _minimum: usize,
+) -> Vec<Vec<CourseSchedule>> {
+    let filtered_courses: Vec<&CourseSchedule> = all_courses.iter()
+        .filter(|s| course_names.contains(&s.materia.nombre.trim().to_string()))
+        .collect();
+
+    let mut grouped_courses: HashMap<(i32, i32), &CourseSchedule> = HashMap::new();
+    for course in filtered_courses {
+        let key = (course.materia.id, course.profesor.id);
+        grouped_courses.insert(key, course);
+    }
+
+    let mut graph = Graph::<(i32, i32), (), Undirected>::default();
+    let mut node_indices = HashMap::new();
+
+    for &key in grouped_courses.keys() {
+        let index = graph.add_node(key);
+        node_indices.insert(key, index);
+    }
+
+    let keys: Vec<(i32, i32)> = grouped_courses.keys().cloned().collect();
+    for i in 0..keys.len() {
+        for j in (i + 1)..keys.len() {
+            let key_i = keys[i];
+            let key_j = keys[j];
+
+            if !courses_overlap(grouped_courses[&key_i], grouped_courses[&key_j]) {
+                let index_i = node_indices[&key_i];
+                let index_j = node_indices[&key_j];
+                graph.add_edge(index_i, index_j, ());
+            }
+        }
+    }
+
+    let mut cliques = Vec::new();
+    let mut r = Vec::new();
+    let mut p: HashSet<_> = graph.node_indices().collect();
+    let mut x = HashSet::new();
+    bron_kerbosch(&graph, &mut r, &mut p, &mut x, &mut cliques);
+
+    let mut final_schedules = Vec::new();
+    for clique in cliques {
+        let mut schedule_group = Vec::new();
+        let mut materias_incluidas = HashSet::new();
+
+        for node_index in &clique {
+            let key = graph[*node_index];
+            let course = grouped_courses[&key].clone();
+            schedule_group.push(course.clone());
+            materias_incluidas.insert(course.materia.nombre.clone());
+        }
+
+        if materias_incluidas.len() == course_names.len() {
+            final_schedules.push(schedule_group);
+        }
+    }
+
+    final_schedules
+}
+
+fn bron_kerbosch(
+    graph: &Graph<(i32, i32), (), Undirected>,
+    r: &mut Vec<NodeIndex>,
+    p: &mut HashSet<NodeIndex>,
+    x: &mut HashSet<NodeIndex>,
+    cliques: &mut Vec<Vec<NodeIndex>>,
+) {
+    if p.is_empty() && x.is_empty() {
+        cliques.push(r.clone());
+    } else {
+        let mut p_vec: Vec<NodeIndex> = p.iter().cloned().collect();
+        while let Some(v) = p_vec.pop() {
+            r.push(v);
+            let neighbors: HashSet<_> = graph.neighbors(v).collect();
+            let mut p_new = p.intersection(&neighbors).cloned().collect();
+            let mut x_new = x.intersection(&neighbors).cloned().collect();
+            bron_kerbosch(graph, r, &mut p_new, &mut x_new, cliques);
+            r.pop();
+            p.remove(&v);
+            x.insert(v);
+        }
+    }
+}
+
+fn courses_overlap(course1: &CourseSchedule, course2: &CourseSchedule) -> bool {
+    for schedule1 in &course1.schedules {
+        for schedule2 in &course2.schedules {
+            if schedule1.dia == schedule2.dia {
+                let start_time1 = parse_time(&schedule1.hora_inicio);
+                let end_time1 = parse_time(&schedule1.hora_fin);
+                let start_time2 = parse_time(&schedule2.hora_inicio);
+                let end_time2 = parse_time(&schedule2.hora_fin);
+
+                if start_time1.is_some() && end_time1.is_some() && start_time2.is_some() && end_time2.is_some() {
+                    let start_time1 = start_time1.unwrap();
+                    let end_time1 = end_time1.unwrap();
+                    let start_time2 = start_time2.unwrap();
+                    let end_time2 = end_time2.unwrap();
+
+                    if (start_time1 < end_time2) && (end_time1 > start_time2) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+fn parse_time(time_str: &str) -> Option<NaiveTime> {
+    NaiveTime::parse_from_str(time_str, "%H:%M:%S").ok()
+        .or_else(|| NaiveTime::parse_from_str(time_str, "%H:%M").ok())
+}
 
 Django
-Modifica los archivos para que al leer e importar los datos del excel se hagan las siguientes consideraciones:
-Debe de haber un solo curso por numero de clase a menos que cambie la info y se debe acabar juntando, los días y horas en una nueva tabla llamada schedules.
-Cada materia debe de tener una llave foránea a su schedule el cual incluye los días que se da esa materia y la hora para que se pueda extraer solo el horario de ese numero de clase mas fácil y que se maneje solo como: Lunes 14:00 - 15:30 Miércoles 14:00 - 15:30 Viernes 13:30 - 15:00
-de igual manera en cada horario se incluye el salon, en caso de ser nulo poner Sin Asignar como un nuevo salon pero si la modalidad es en linea poner En Linea como un nuevo salon
-e incluir el profesor que imparte ese horario
-Hacer validaciones para poder hacer este merge como
-si tienen el mismo numero de clase, que no se repita la información, pero si cambie aunque sea el profesor por ejemplo crear otra clase con ese numero pero con el diferente profesor
+Dockerfile
+# backend/Dockerfile
 
-En la tabla materias se esta insertando materias pero cada que hay un código nuevo mas no cada que hay un nombre nuevo, en materias se debe de guardar todos los datos por nombre de materia no por código ya que el código se puede repetir para otra materia porque es el código de la escuela o facultad y la materia es el valor importante a registrar
+FROM python:3.11-slim
 
-En general los ajustes es para que en vez de hacer un registro por hora de clase en la bd prácticamente, ya se fusionan todas las horas de una clase para mostrar un curso con la información completa  y su horario con las diferentes horas de clase que tiene en la semana que puede ser una dos o tres por ejemplo
+# Establecer el directorio de trabajo
+WORKDIR /app
+
+# Instalar dependencias del sistema
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libpq-dev \
+    netcat-openbsd \
+    && rm -rf /var/lib/apt/lists/*
+
+
+
+# Copiar y instalar dependencias de Python
+COPY requirements.txt .
+RUN pip install --upgrade pip
+RUN pip install -r requirements.txt
+
+# Copiar el código de la aplicación
+COPY . .
+
+# Dar permisos al entrypoint
+RUN chmod +x entrypoint.sh
+
+# Comando por defecto
+CMD ["./entrypoint.sh"]
+
+entrypoint.sh
+#!/bin/sh
+set -e
+
+echo "Esperando a que la base de datos Postgres se inicie..."
+
+while ! nc -z $DB_HOST $DB_PORT; do
+  sleep 0.1
+done
+
+echo "Base de datos Postgres iniciada"
+echo "Checking for changes that require migrations..."
+python manage.py makemigrations --dry-run | grep 'No changes detected' || {
+  echo "Creating migrations..."
+  python manage.py makemigrations app
+  echo "<==================================>"
+}
+# Ejecutar migraciones
+python manage.py migrate
+
+# Ejecutar el comando de importación del Excel
+python manage.py import_excel
+
+# Iniciar el servidor
+python manage.py runserver 0.0.0.0:8000
+
+import_excel.py
+import pandas as pd
+from django.core.management.base import BaseCommand
+from app.models import Materia, Profesor, Salon, Curso, Schedule
+from datetime import datetime
+import os
+from django.conf import settings
+import logging
+logger = logging.getLogger('app')
+
+class Command(BaseCommand):
+    help = 'Importa datos desde un archivo Excel a la base de datos'
+
+    def handle(self, *args, **kwargs):
+        try:
+            excel_file_path = os.path.join(settings.BASE_DIR, 'Schedule.xlsx')
+            self.stdout.write(f"Buscando el archivo Excel en: {excel_file_path}")
+            try:
+                df = pd.read_excel(excel_file_path)
+            except Exception as e:
+                self.stdout.write(self.style.ERROR(f"Error al leer el archivo Excel: {e}"))
+                return
+
+            # Imprimir los nombres de las columnas para verificar
+            print("Columnas del DataFrame:", df.columns.tolist())
+
+            # Preprocesar el DataFrame
+            df.fillna('', inplace=True)
+
+            # Agrupar por 'No de clase' y 'Profesor'
+            grouped = df.groupby(['No de clase', 'Profesor'])
+            for (no_de_clase, profesor_nombre), group in grouped:
+                profesor_nombre = profesor_nombre.strip()
+                profesor, _ = Profesor.objects.get_or_create(nombre=profesor_nombre)
+
+                materia_nombre = group['Clase'].iloc[0].strip()
+                materia, _ = Materia.objects.get_or_create(
+                    nombre=materia_nombre,
+                    defaults={
+                        'no_de_catalogo': group['No de catálogo'].iloc[0],
+                        'codigo': group['Materia'].iloc[0]
+                    }
+                )
+
+                # Verificar si la columna 'Idioma en que se imparte la materia' existe
+                if 'Idioma en que se imparte la materia' in group.columns:
+                    idioma_impartido = group['Idioma en que se imparte la materia '].iloc[0]
+                else:
+                    idioma_impartido = ''
+
+                curso_data = {
+                    'id_del_curso': group['Id del Curso'].iloc[0],
+                    'ciclo': group['Ciclo'].iloc[0],
+                    'sesion': group['Sesión'].iloc[0],
+                    'materia': materia,
+                    'mat_comb': group['Mat. Comb.'].iloc[0],
+                    'clases_comb': group['Clases Comb.'].iloc[0],
+                    'capacidad_inscripcion_combinacion': group['Capacidad\nInscripción\nCombinación'].iloc[0],
+                    'no_de_catalogo': group['No de catálogo'].iloc[0],
+                    'clase': group['Clase'].iloc[0],
+                    'no_de_clase': no_de_clase,
+                    'capacidad_inscripcion': group['Capacidad Inscripción'].iloc[0],
+                    'total_inscripciones': group['Total  inscripciones'].iloc[0],
+                    'total_inscripciones_materia_combinada': group['Total de inscripciones materia combinada'].iloc[0],
+                    'fecha_inicial': group['Fecha inicial'].iloc[0],
+                    'fecha_final': group['Fecha final'].iloc[0],
+                    'bloque_optativo': group['Bloque optativo'].iloc[0],
+                    'idioma_impartido': idioma_impartido,
+                    'modalidad_clase': group['Modalidad de la clase'].iloc[0],
+                    'profesor': profesor,
+                }
+
+                curso, created = Curso.objects.get_or_create(
+                    no_de_clase=no_de_clase,
+                    profesor=profesor,
+                    defaults=curso_data
+                )
+
+                for index, row in group.iterrows():
+                    days = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
+                    for day in days:
+                        if row[day] == 'X':
+                            dia = day
+
+                            # Procesar horas
+                            try:
+                                hora_inicio = datetime.strptime(str(row['Hora inicio']), '%I:%M %p').time()
+                                hora_fin = datetime.strptime(str(row['Hora fin']), '%I:%M %p').time()
+                            except ValueError:
+                                hora_inicio = datetime.strptime(str(row['Hora inicio']), '%H:%M').time()
+                                hora_fin = datetime.strptime(str(row['Hora fin']), '%H:%M').time()
+
+                            # Procesar salón
+                            salon_nombre = row['Salón'].strip()
+                            modalidad_clase = row['Modalidad de la clase'].strip().upper()
+
+                            if modalidad_clase in ['ENLINEA', 'EN LÍNEA']:
+                                salon_nombre = 'En Línea'
+                            elif not salon_nombre:
+                                salon_nombre = 'Sin Asignar'
+
+                            salon, _ = Salon.objects.get_or_create(nombre=salon_nombre, defaults={'capacidad': row['Capacidad del salón']})
+
+                            # Crear horario
+                            schedule, created = Schedule.objects.get_or_create(
+                                curso=curso,
+                                dia=dia,
+                                hora_inicio=hora_inicio,
+                                hora_fin=hora_fin,
+                                salon=salon,
+                                profesor=profesor
+                            )
+
+                # self.stdout.write(self.style.SUCCESS(f'Curso {curso.id_del_curso} importado exitosamente'))
+                # self.stdout.write(self.style.SUCCESS(f'Horarios del curso {schedule} importados exitosamente'))
+
+            self.stdout.write(self.style.SUCCESS('Todos los datos han sido importados exitosamente'))
+
+        except Exception as e:
+            logger.error(f"Error al importar datos: {e}")
+            self.stdout.write(self.style.ERROR(f"Error al importar datos: {e}"))
 
 models.py
 from django.db import models
 
 class Materia(models.Model):
-    codigo = models.CharField(max_length=50)  # Campo 'Materia' en el Excel
-    nombre = models.CharField(max_length=255)  # Campo 'Clase' en el Excel
-    no_de_catalogo = models.CharField(max_length=50)  # Campo 'No de catálogo'
-
-    def __str__(self):
-        return f"{self.nombre} ({self.codigo})"
-
-class Salon(models.Model):
-    nombre = models.CharField(max_length=50)
-    capacidad = models.IntegerField(null=True, blank=True)
+    nombre = models.CharField(max_length=255, unique=True)  # Usar 'nombre' como identificador único
+    no_de_catalogo = models.CharField(max_length=50, blank=True, null=True)
+    codigo = models.CharField(max_length=50, blank=True, null=True)  # Campo opcional
 
     def __str__(self):
         return self.nombre
 
 class Profesor(models.Model):
-    nombre = models.CharField(max_length=255)
+    nombre = models.CharField(max_length=255, unique=True)
+
+    def __str__(self):
+        return self.nombre
+
+class Salon(models.Model):
+    nombre = models.CharField(max_length=50, unique=True)
+    capacidad = models.IntegerField(null=True, blank=True)
 
     def __str__(self):
         return self.nombre
@@ -55,179 +716,170 @@ class Curso(models.Model):
     total_inscripciones_materia_combinada = models.IntegerField(verbose_name='Total de inscripciones materia combinada')
     fecha_inicial = models.DateField(verbose_name='Fecha inicial')
     fecha_final = models.DateField(verbose_name='Fecha final')
-    salon = models.ForeignKey(Salon, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='Salón')
-    capacidad_del_salon = models.IntegerField(verbose_name='Capacidad del salón')
-    hora_inicio = models.TimeField(verbose_name='Hora inicio')
-    hora_fin = models.TimeField(verbose_name='Hora fin')
-    profesor = models.ForeignKey(Profesor, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='Profesor')
-    lunes = models.BooleanField(default=False, verbose_name='Lunes')
-    martes = models.BooleanField(default=False, verbose_name='Martes')
-    miercoles = models.BooleanField(default=False, verbose_name='Miércoles')
-    jueves = models.BooleanField(default=False, verbose_name='Jueves')
-    viernes = models.BooleanField(default=False, verbose_name='Viernes')
-    sabado = models.BooleanField(default=False, verbose_name='Sábado')
-    domingo = models.BooleanField(default=False, verbose_name='Domingo')
     bloque_optativo = models.CharField(max_length=50, verbose_name='Bloque optativo')
     idioma_impartido = models.CharField(max_length=50, blank=True, null=True, verbose_name='Idioma en que se imparte la materia')
     modalidad_clase = models.CharField(max_length=50, blank=True, null=True, verbose_name='Modalidad de la clase')
+    profesor = models.ForeignKey(Profesor, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='Profesor')
 
     def __str__(self):
-        return f"Curso {self.id_del_curso} - {self.materia.nombre}"
+        return f"Curso {self.id_del_curso} - {self.materia.nombre} - Clase {self.no_de_clase}"
 
-import_excel.py
-import pandas as pd
-from django.core.management.base import BaseCommand
-from app.models import Materia, Profesor, Salon, Curso
-from django.utils import timezone
-from datetime import datetime
-import os
-from django.conf import settings
-import logging
-logger = logging.getLogger('app')
+class Schedule(models.Model):
+    curso = models.ForeignKey(Curso, on_delete=models.CASCADE, related_name='schedules')
+    dia = models.CharField(max_length=10, choices=[
+        ('Lunes', 'Lunes'),
+        ('Martes', 'Martes'),
+        ('Miércoles', 'Miércoles'),
+        ('Jueves', 'Jueves'),
+        ('Viernes', 'Viernes'),
+        ('Sábado', 'Sábado'),
+        ('Domingo', 'Domingo'),
+    ])
+    hora_inicio = models.TimeField(verbose_name='Hora inicio')
+    hora_fin = models.TimeField(verbose_name='Hora fin')
+    salon = models.ForeignKey(Salon, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='Salón')
+    profesor = models.ForeignKey(Profesor, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='Profesor')
 
-class Command(BaseCommand):
-    help = 'Importa datos desde un archivo Excel a la base de datos'
+    def __str__(self):
+        return f"{self.dia} {self.hora_inicio.strftime('%H:%M')} - {self.hora_fin.strftime('%H:%M')}"
 
-    def handle(self, *args, **kwargs):
-        try:
-            excel_file_path = os.path.join(settings.BASE_DIR, 'Schedule.xlsx')
-            self.stdout.write(f"Buscando el archivo Excel en: {excel_file_path}")
-            try:
-                df = pd.read_excel(excel_file_path)
-            except Exception as e:
-                self.stdout.write(self.style.ERROR(f"Error al leer el archivo Excel: {e}"))
-                return
-            # Procesa cada fila del DataFrame
-            for index, row in df.iterrows():
-                # Crear o obtener el profesor
-                profesor, _ = Profesor.objects.get_or_create(nombre=row['Profesor'])
-
-                # Crear o obtener el salón
-                salon, _ = Salon.objects.get_or_create(nombre=row['Salón'], defaults={'capacidad': row['Capacidad del salón']})
-
-                # Crear o obtener la materia
-                materia_obj, _ = Materia.objects.get_or_create(
-                    codigo=row['Materia'],
-                    defaults={
-                        'nombre': row['Clase'],
-                        'no_de_catalogo': row['No de catálogo']
-                    }
-                )
-
-                # Convertir campos de fecha y hora
-                fecha_inicial = datetime.strptime(str(row['Fecha inicial']), '%Y-%m-%d')
-                fecha_final = datetime.strptime(str(row['Fecha final']), '%Y-%m-%d')
-                hora_inicio = datetime.strptime(str(row['Hora inicio']), '%I:%M %p').time()
-                hora_fin = datetime.strptime(str(row['Hora fin']), '%I:%M %p').time()
-
-                # Convertir campos de días de la semana
-                dias = {
-                    'lunes': row['Lunes'] == 'X',
-                    'martes': row['Martes'] == 'X',
-                    'miercoles': row['Miércoles'] == 'X',
-                    'jueves': row['Jueves'] == 'X',
-                    'viernes': row['Viernes'] == 'X',
-                    'sabado': row['Sábado'] == 'X',
-                    'domingo': False  # Siempre vacío
-                }
-
-                # Crear el curso
-                Curso.objects.create(
-                    id_del_curso=row['Id del Curso'],
-                    ciclo=row['Ciclo'],
-                    sesion=row['Sesión'],
-                    materia=materia_obj,
-                    mat_comb=row['Mat. Comb.'],
-                    clases_comb=row['Clases Comb.'],
-                    capacidad_inscripcion_combinacion=row['Capacidad\nInscripción\nCombinación'],
-                    no_de_catalogo=row['No de catálogo'],
-                    clase=row['Clase'],
-                    no_de_clase=row['No de clase'],
-                    capacidad_inscripcion=row['Capacidad Inscripción'],
-                    total_inscripciones=row['Total  inscripciones'],
-                    total_inscripciones_materia_combinada=row['Total de inscripciones materia combinada'],
-                    fecha_inicial=fecha_inicial,
-                    fecha_final=fecha_final,
-                    salon=salon,
-                    capacidad_del_salon=salon.capacidad,
-                    hora_inicio=hora_inicio,
-                    hora_fin=hora_fin,
-                    profesor=profesor,
-                    bloque_optativo=row['Bloque optativo'],
-                    modalidad_clase=row['Modalidad de la clase'],
-                    **dias
-                )
-
-            self.stdout.write(self.style.SUCCESS('Datos importados exitosamente'))
-        except Exception as e:
-            logger.error(f"Error al importar datos: {e}")
-            self.stdout.write(self.style.ERROR(f"Error al importar datos: {e}"))
-serializers.py
-from rest_framework import serializers
-from .models import Curso, Materia, Profesor, Salon
-
-        
-class MateriaSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Materia
-        fields = '__all__'
-
-class ProfesorSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Profesor
-        fields = '__all__'
-
-class SalonSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Salon
-        fields = '__all__'
-
-class CursoSerializer(serializers.ModelSerializer):
-    materia = MateriaSerializer()
-    profesor = ProfesorSerializer()
-    salon = SalonSerializer()
-
-    class Meta:
-        model = Curso
-        fields = '__all__'
-
-views.py
-from rest_framework import viewsets
-from .models import Curso, Materia, Profesor, Salon
-from .serializers import CursoSerializer, MateriaSerializer, ProfesorSerializer, SalonSerializer
-from django_filters.rest_framework import DjangoFilterBackend
-from .filters import CursoFilter
-
-class CursoViewSet(viewsets.ModelViewSet):
-    queryset = Curso.objects.all()
-    serializer_class = CursoSerializer
-    filter_backends = [DjangoFilterBackend]
-    filterset_class = CursoFilter
-
-class MateriaViewSet(viewsets.ModelViewSet):
-    queryset = Materia.objects.all()
-    serializer_class = MateriaSerializer
-
-class ProfesorViewSet(viewsets.ModelViewSet):
-    queryset = Profesor.objects.all()
-    serializer_class = ProfesorSerializer
-
-class SalonViewSet(viewsets.ModelViewSet):
-    queryset = Salon.objects.all()
-    serializer_class = SalonSerializer
-
-filters.py
-import django_filters
-from .models import Curso
-
-class CursoFilter(django_filters.FilterSet):
-    materia__codigo = django_filters.CharFilter(field_name='materia__codigo', lookup_expr='exact')
-    profesor__nombre = django_filters.CharFilter(field_name='profesor__nombre', lookup_expr='icontains')
-    salon__nombre = django_filters.CharFilter(field_name='salon__nombre', lookup_expr='exact')
-    ciclo = django_filters.NumberFilter(field_name='ciclo', lookup_expr='exact')
-    sesion = django_filters.CharFilter(field_name='sesion', lookup_expr='exact')
-
-    class Meta:
-        model = Curso
-        fields = ['materia__codigo', 'profesor__nombre', 'salon__nombre', 'ciclo', 'sesion']
-
+docker compose up --build                                                 ─╯
+[+] Building 276.6s (30/30) FINISHED
+ => [backwellc-rust_app internal] load build definition from Dockerfile    0.0s
+ => => transferring dockerfile: 32B                                        0.0s
+ => [backwellc-web internal] load build definition from Dockerfile         0.0s
+ => => transferring dockerfile: 32B                                        0.0s
+ => [backwellc-rust_app internal] load .dockerignore                       0.0s
+ => => transferring context: 2B                                            0.0s
+ => [backwellc-web internal] load .dockerignore                            0.0s
+ => => transferring context: 2B                                            0.0s
+ => [backwellc-rust_app internal] load metadata for docker.io/library/deb  1.0s
+ => [backwellc-rust_app internal] load metadata for docker.io/library/rus  0.8s
+ => [backwellc-web internal] load metadata for docker.io/library/python:3  0.7s
+ => [backwellc-web 1/8] FROM docker.io/library/python:3.11-slim@sha256:51  0.0s
+ => [backwellc-web internal] load build context                            0.0s
+ => => transferring context: 2.32kB                                        0.0s
+ => CACHED [backwellc-web 2/8] WORKDIR /app                                0.0s
+ => CACHED [backwellc-web 3/8] RUN apt-get update && apt-get install -y    0.0s
+ => CACHED [backwellc-web 4/8] COPY requirements.txt .                     0.0s
+ => CACHED [backwellc-web 5/8] RUN pip install --upgrade pip               0.0s
+ => CACHED [backwellc-web 6/8] RUN pip install -r requirements.txt         0.0s
+ => CACHED [backwellc-web 7/8] COPY . .                                    0.0s
+ => CACHED [backwellc-web 8/8] RUN chmod +x entrypoint.sh                  0.0s
+ => [backwellc-rust_app] exporting to image                                0.0s
+ => => exporting layers                                                    0.0s
+ => => writing image sha256:45d5c4065681653a9819cb5095b39341721df5409a054  0.0s
+ => => naming to docker.io/library/backwellc-web                           0.0s
+ => => writing image sha256:b4e470c01640588e30594f6d5d7455b5a314047527dac  0.0s
+ => => naming to docker.io/library/backwellc-rust_app                      0.0s
+ => [backwellc-rust_app builder 1/8] FROM docker.io/library/rust:1.81-sli  0.0s
+ => [backwellc-rust_app stage-1 1/4] FROM docker.io/library/debian:bullse  0.0s
+ => [backwellc-rust_app internal] load build context                       0.3s
+ => => transferring context: 245.74kB                                      0.3s
+ => CACHED [backwellc-rust_app builder 2/8] RUN apt-get update && apt-get  0.0s
+ => CACHED [backwellc-rust_app builder 3/8] WORKDIR /app                   0.0s
+ => [backwellc-rust_app builder 4/8] COPY Cargo.toml Cargo.lock ./         0.1s
+ => [backwellc-rust_app builder 5/8] RUN mkdir src && echo "fn main() {}"  0.3s
+ => [backwellc-rust_app builder 6/8] RUN cargo build --release           271.3s
+ => [backwellc-rust_app builder 7/8] COPY . .                              2.1s
+ => [backwellc-rust_app builder 8/8] RUN cargo build --release             1.0s
+ => CACHED [backwellc-rust_app stage-1 2/4] RUN apt-get update && apt-get  0.0s
+ => CACHED [backwellc-rust_app stage-1 3/4] WORKDIR /app                   0.0s
+ => CACHED [backwellc-rust_app stage-1 4/4] COPY --from=builder /app/targ  0.0s
+[+] Running 6/6
+ ⠿ Network backwellc_default         Create...                             0.1s
+ ⠿ Volume "backwellc_postgres_data"  Created                               0.0s
+ ⠿ Container backwellc-adminer-1     Cr...                                 0.5s
+ ⠿ Container backwellc-db-1          Created                               0.5s
+ ⠿ Container backwellc-web-1         Create...                             0.7s
+ ⠿ Container rust_app                Created                               0.5s
+Attaching to backwellc-adminer-1, backwellc-db-1, backwellc-web-1, rust_app
+backwellc-adminer-1  | [Wed Oct 30 23:40:48 2024] PHP 7.4.33 Development Server (http://[::]:8080) started
+backwellc-db-1       | The files belonging to this database system will be owned by user "postgres".
+backwellc-db-1       | This user must also own the server process.
+backwellc-db-1       |
+backwellc-db-1       | The database cluster will be initialized with locale "en_US.utf8".
+backwellc-db-1       | The default database encoding has accordingly been set to "UTF8".
+backwellc-db-1       | The default text search configuration will be set to "english".
+backwellc-db-1       |
+backwellc-db-1       | Data page checksums are disabled.
+backwellc-db-1       |
+backwellc-db-1       | fixing permissions on existing directory /var/lib/postgresql/data ... ok
+backwellc-db-1       | creating subdirectories ... ok
+backwellc-db-1       | selecting dynamic shared memory implementation ... posix
+backwellc-db-1       | selecting default max_connections ... 100
+backwellc-db-1       | selecting default shared_buffers ... 128MB
+backwellc-db-1       | selecting default time zone ... Etc/UTC
+backwellc-db-1       | creating configuration files ... ok
+backwellc-web-1      | Esperando a que la base de datos Postgres se inicie...
+backwellc-db-1       | running bootstrap script ... ok
+rust_app exited with code 0
+backwellc-db-1       | performing post-bootstrap initialization ... ok
+backwellc-db-1       | syncing data to disk ... ok
+backwellc-db-1       |
+backwellc-db-1       |
+backwellc-db-1       | Success. You can now start the database server using:
+backwellc-db-1       |
+backwellc-db-1       |     pg_ctl -D /var/lib/postgresql/data -l logfile start
+backwellc-db-1       |
+backwellc-db-1       | initdb: warning: enabling "trust" authentication for local connections
+backwellc-db-1       | You can change this by editing pg_hba.conf or using the option -A, or
+backwellc-db-1       | --auth-local and --auth-host, the next time you run initdb.
+backwellc-db-1       | waiting for server to start....2024-10-30 23:40:50.087 UTC [47] LOG:  starting PostgreSQL 14.13 (Debian 14.13-1.pgdg120+1) on x86_64-pc-linux-gnu, compiled by gcc (Debian 12.2.0-14) 12.2.0, 64-bit
+backwellc-db-1       | 2024-10-30 23:40:50.089 UTC [47] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
+backwellc-db-1       | 2024-10-30 23:40:50.097 UTC [48] LOG:  database system was shut down at 2024-10-30 23:40:49 UTC
+backwellc-db-1       | 2024-10-30 23:40:50.107 UTC [47] LOG:  database system is ready to accept connections
+backwellc-db-1       |  done
+backwellc-db-1       | server started
+backwellc-db-1       | CREATE DATABASE
+backwellc-db-1       |
+backwellc-db-1       |
+backwellc-db-1       | /usr/local/bin/docker-entrypoint.sh: ignoring /docker-entrypoint-initdb.d/*
+backwellc-db-1       |
+backwellc-db-1       | waiting for server to shut down...2024-10-30 23:40:50.431 UTC [47] LOG:  received fast shutdown request
+backwellc-db-1       | .2024-10-30 23:40:50.433 UTC [47] LOG:  aborting any active transactions
+backwellc-db-1       | 2024-10-30 23:40:50.439 UTC [47] LOG:  background worker "logical replication launcher" (PID 54) exited with exit code 1
+backwellc-db-1       | 2024-10-30 23:40:50.439 UTC [49] LOG:  shutting down
+backwellc-db-1       | 2024-10-30 23:40:50.461 UTC [47] LOG:  database system is shut down
+backwellc-db-1       |  done
+backwellc-db-1       | server stopped
+backwellc-db-1       |
+backwellc-db-1       | PostgreSQL init process complete; ready for start up.
+backwellc-db-1       |
+backwellc-db-1       | 2024-10-30 23:40:50.564 UTC [1] LOG:  starting PostgreSQL 14.13 (Debian 14.13-1.pgdg120+1) on x86_64-pc-linux-gnu, compiled by gcc (Debian 12.2.0-14) 12.2.0, 64-bit
+backwellc-db-1       | 2024-10-30 23:40:50.565 UTC [1] LOG:  listening on IPv4 address "0.0.0.0", port 5432
+backwellc-db-1       | 2024-10-30 23:40:50.565 UTC [1] LOG:  listening on IPv6 address "::", port 5432
+backwellc-db-1       | 2024-10-30 23:40:50.568 UTC [1] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
+backwellc-db-1       | 2024-10-30 23:40:50.580 UTC [62] LOG:  database system was shut down at 2024-10-30 23:40:50 UTC
+backwellc-web-1      | Base de datos Postgres iniciada
+backwellc-web-1      | Checking for changes that require migrations...
+backwellc-db-1       | 2024-10-30 23:40:50.595 UTC [1] LOG:  database system is ready to accept connections
+backwellc-web-1      | No changes detected
+backwellc-web-1      | Operations to perform:
+backwellc-web-1      |   Apply all migrations: admin, app, auth, contenttypes, sessions
+backwellc-web-1      | Running migrations:
+backwellc-web-1      |   Applying contenttypes.0001_initial... OK
+backwellc-web-1      |   Applying auth.0001_initial... OK
+backwellc-web-1      |   Applying admin.0001_initial... OK
+backwellc-web-1      |   Applying admin.0002_logentry_remove_auto_add... OK
+backwellc-web-1      |   Applying admin.0003_logentry_add_action_flag_choices... OK
+backwellc-web-1      |   Applying app.0001_initial... OK
+backwellc-web-1      |   Applying contenttypes.0002_remove_content_type_name... OK
+backwellc-web-1      |   Applying auth.0002_alter_permission_name_max_length... OK
+backwellc-web-1      |   Applying auth.0003_alter_user_email_max_length... OK
+backwellc-web-1      |   Applying auth.0004_alter_user_username_opts... OK
+backwellc-web-1      |   Applying auth.0005_alter_user_last_login_null... OK
+backwellc-web-1      |   Applying auth.0006_require_contenttypes_0002... OK
+backwellc-web-1      |   Applying auth.0007_alter_validators_add_error_messages... OK
+backwellc-web-1      |   Applying auth.0008_alter_user_username_max_length... OK
+backwellc-web-1      |   Applying auth.0009_alter_user_last_name_max_length... OK
+backwellc-web-1      |   Applying auth.0010_alter_group_name_max_length... OK
+backwellc-web-1      |   Applying auth.0011_update_proxy_permissions... OK
+backwellc-web-1      |   Applying auth.0012_alter_user_first_name_max_length... OK
+backwellc-web-1      |   Applying sessions.0001_initial... OK
+backwellc-web-1      | /app/app/management/commands/import_excel.py:27: FutureWarning: Setting an item of incompatible dtype is deprecated and will raise an error in a future version of pandas. Value '' has dtype incompatible with float64, please explicitly cast to a compatible dtype first.
+backwellc-web-1      |   df.fillna('', inplace=True)
+backwellc-web-1      | Buscando el archivo Excel en: /app/Schedule.xlsx
+backwellc-web-1      | Columnas del DataFrame: ['Id del Curso', 'Ciclo', 'Sesión', 'Materia', 'Mat. Comb.', 'Clases Comb.', 'Capacidad\nInscripción\nCombinación', 'No de catálogo', 'Clase', 'No de clase', 'Capacidad Inscripción', 'Total  inscripciones', 'Total de inscripciones materia combinada', 'Fecha inicial', 'Fecha final', 'Salón', 'Capacidad del salón', 'Hora inicio', 'Hora fin', 'Profesor', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo', 'Bloque optativo', 'Idioma en que se imparte la materia ', 'Modalidad de la clase']
+backwellc-web-1      | Todos los datos han sido importados exitosamente
+backwellc-web-1      | Watching for file changes with StatReloader

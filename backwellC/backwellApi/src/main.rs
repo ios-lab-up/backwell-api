@@ -1,10 +1,10 @@
-// src/main.rs
-
-use actix_web::{web, App, HttpServer, HttpResponse, Responder};
+use actix_web::{web, App, HttpServer, HttpResponse};
 use serde::{Deserialize, Serialize};
 use reqwest::Client;
 use log::{info, error};
+use std::collections::HashMap;
 use std::env;
+use url::Url;
 
 mod schedule_utils;
 
@@ -16,7 +16,9 @@ struct GenerateScheduleRequest {
 
 #[derive(Serialize)]
 struct GenerateScheduleResponse {
-    schedule_groups: Vec<Vec<CourseSchedule>>,
+    response: u16,
+    data: Vec<Vec<CourseSchedule>>,
+    schedule_s: HashMap<String, HashMap<String, HashMap<String, String>>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -24,7 +26,7 @@ struct CourseSchedule {
     id: i32,
     materia: Materia,
     profesor: Profesor,
-    salon: Salon,
+    schedules: Vec<Schedule>,
     id_del_curso: i32,
     ciclo: i32,
     sesion: String,
@@ -39,27 +41,28 @@ struct CourseSchedule {
     total_inscripciones_materia_combinada: i32,
     fecha_inicial: String,
     fecha_final: String,
-    capacidad_del_salon: i32,
-    hora_inicio: String,
-    hora_fin: String,
-    lunes: bool,
-    martes: bool,
-    miercoles: bool,
-    jueves: bool,
-    viernes: bool,
-    sabado: bool,
-    domingo: bool,
     bloque_optativo: String,
     idioma_impartido: Option<String>,
     modalidad_clase: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+struct Schedule {
+    id: i32,
+    salon: Salon,
+    profesor: Profesor,
+    dia: String,
+    hora_inicio: String,
+    hora_fin: String,
+    curso: i32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct Materia {
     id: i32,
-    codigo: String,
     nombre: String,
-    no_de_catalogo: String,
+    no_de_catalogo: Option<String>,
+    codigo: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -72,20 +75,24 @@ struct Profesor {
 struct Salon {
     id: i32,
     nombre: String,
-    capacidad: i32,
+    capacidad: Option<i32>,
 }
-// Handler for generating schedules
-async fn generate_schedule(req_body: web::Json<GenerateScheduleRequest>) -> impl Responder {
-    // Fetch data from the Django API
+
+async fn generate_schedule(req_body: web::Json<GenerateScheduleRequest>) -> impl actix_web::Responder {
     let client = Client::builder()
-        .use_rustls_tls()
         .build()
         .expect("Failed to build HTTP client");
 
-    // Replace with your actual Django API URL
-    let django_api_url = env::var("DJANGO_API_URL").unwrap_or_else(|_| "http://127.0.0.1:8001/api/cursos/".to_string());
+    let django_api_base_url = env::var("DJANGO_API_URL")
+        .unwrap_or_else(|_| "http://web:8000/api/cursos/".to_string());
 
-    let response = client.get(&django_api_url)
+    let mut url = Url::parse(&django_api_base_url).expect("Invalid Django API URL");
+    for course_name in &req_body.courses {
+        url.query_pairs_mut()
+            .append_pair("materia__nombre", course_name);
+    }
+
+    let response = client.get(url)
         .send()
         .await;
 
@@ -107,47 +114,55 @@ async fn generate_schedule(req_body: web::Json<GenerateScheduleRequest>) -> impl
         }
     };
 
-    // Process the data to create compatible schedules
     let compatible_schedules = schedule_utils::create_compatible_schedules(
         &courses_data,
         &req_body.courses,
         req_body.minimum,
     );
 
-    // Prepare the response
+    let schedule_s = simplify_schedules(&compatible_schedules);
+
     let response = GenerateScheduleResponse {
-        schedule_groups: compatible_schedules,
+        response: 200,
+        data: compatible_schedules,
+        schedule_s,
     };
 
     HttpResponse::Ok().json(response)
 }
 
+// Simplifies the schedule for the `scheduleS` section
+fn simplify_schedules(schedules: &Vec<Vec<CourseSchedule>>) -> HashMap<String, HashMap<String, HashMap<String, String>>> {
+    let mut result = HashMap::new();
+
+    for (i, schedule_group) in schedules.iter().enumerate() {
+        let mut schedule_map = HashMap::new();
+        for course in schedule_group {
+            let mut days_map = HashMap::new();
+            for sched in &course.schedules {
+                let time_range = format!("{} - {}", sched.hora_inicio, sched.hora_fin);
+                days_map.insert(sched.dia.clone(), time_range);
+            }
+            schedule_map.insert(course.materia.nombre.clone(), days_map);
+        }
+        result.insert(format!("horario{}", i + 1), schedule_map);
+    }
+
+    result
+}
+
 #[actix_web::main]
-async fn main() {
-    // Initialize logger
+async fn main() -> std::io::Result<()> {
     env_logger::init();
 
-    // Set the server port
     let port = 8082;
-
-    // Start the HTTP server
     info!("Starting server at http://0.0.0.0:{}", port);
 
-    // Attempt to bind and run the server, logging any errors
-    let server = HttpServer::new(|| {
+    HttpServer::new(|| {
         App::new()
             .route("/generate_schedule", web::post().to(generate_schedule))
     })
-    .bind(("0.0.0.0", port));
-
-    match server {
-        Ok(srv) => {
-            if let Err(e) = srv.run().await {
-                error!("Server encountered an error while running: {}", e);
-            }
-        }
-        Err(e) => {
-            error!("Failed to bind to port {}: {}", port, e);
-        }
-    }
+    .bind(("0.0.0.0", port))?
+    .run()
+    .await
 }

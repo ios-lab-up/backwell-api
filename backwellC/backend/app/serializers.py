@@ -1,7 +1,8 @@
-from rest_framework import serializers
-from .models import Curso, Materia, Profesor, Salon
+# backend/app/serializers.py
 
-        
+from rest_framework import serializers
+from .models import Curso, Materia, Profesor, Salon, Schedule
+
 class MateriaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Materia
@@ -17,11 +18,23 @@ class SalonSerializer(serializers.ModelSerializer):
         model = Salon
         fields = '__all__'
 
+class ScheduleSerializer(serializers.ModelSerializer):
+    salon = SalonSerializer()
+    profesor = ProfesorSerializer()
+
+    class Meta:
+        model = Schedule
+        fields = '__all__'
+
 class CursoSerializer(serializers.ModelSerializer):
     materia = MateriaSerializer()
     profesor = ProfesorSerializer()
-    salon = SalonSerializer()
+    schedules = ScheduleSerializer(many=True)
+    horario = serializers.SerializerMethodField()
 
     class Meta:
         model = Curso
         fields = '__all__'
+
+    def get_horario(self, obj):
+        return obj.get_horario()

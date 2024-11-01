@@ -1,4 +1,4 @@
-// src/schedule_utils.rs
+// backwellApi/src/schedule_utils.rs
 
 use crate::CourseSchedule;
 use chrono::NaiveTime;
@@ -6,51 +6,37 @@ use petgraph::graph::{Graph, NodeIndex};
 use petgraph::Undirected;
 use std::collections::{HashMap, HashSet};
 
-/// Creates compatible schedules from a list of all schedules and a list of course names.
-/// 
-/// # Arguments
-/// 
-/// * `all_schedules` - A vector of all course schedules.
-/// * `course_names` - A vector of course names to filter schedules.
-/// * `_minimum` - A minimum number of schedules (currently unused).
-/// 
-/// # Returns
-/// 
-/// A vector of vectors, where each inner vector represents a group of compatible schedules.
 pub fn create_compatible_schedules(
-    all_schedules: &Vec<CourseSchedule>,
+    all_courses: &Vec<CourseSchedule>,
     course_names: &Vec<String>,
     _minimum: usize,
 ) -> Vec<Vec<CourseSchedule>> {
-    // Filter schedules for the requested courses
-    let filtered_schedules: Vec<&CourseSchedule> = all_schedules.iter()
-        .filter(|s| course_names.contains(&s.materia.nombre.trim().to_string()))
-        .collect();
+    let filtered_courses: Vec<&CourseSchedule> = all_courses.iter()
+    .filter(|s| course_names.contains(&s.materia.nombre.trim().to_string()))
+    .collect();
 
-    // Group schedules by course and professor
-    let mut grouped_schedules: HashMap<(i32, i32), Vec<&CourseSchedule>> = HashMap::new();
-    for schedule in filtered_schedules {
-        let key = (schedule.materia.id, schedule.profesor.id);
-        grouped_schedules.entry(key).or_insert(Vec::new()).push(schedule);
+    let mut grouped_courses: HashMap<(String, i32), &CourseSchedule> = HashMap::new();
+    for course in filtered_courses {
+        let key = (course.materia.nombre.clone(), course.profesor.id);
+        grouped_courses.insert(key.clone(), course);
     }
 
-    // Build the graph
-    let mut graph = Graph::<(i32, i32), (), Undirected>::default();
+    let mut graph = Graph::<(String, i32), (), Undirected>::default();
     let mut node_indices = HashMap::new();
 
-    // Add nodes to the graph
-    for &key in grouped_schedules.keys() {
-        let index = graph.add_node(key);
-        node_indices.insert(key, index);
+    // Corregido: eliminar '&' en el bucle
+    for key in grouped_courses.keys() {
+        let index = graph.add_node(key.clone());
+        node_indices.insert(key.clone(), index);
     }
 
-    // Add edges between non-overlapping schedules
-    let keys: Vec<(i32, i32)> = grouped_schedules.keys().cloned().collect();
+    let keys: Vec<(String, i32)> = grouped_courses.keys().cloned().collect();
     for i in 0..keys.len() {
-        for j in (i+1)..keys.len() {
-            let key_i = keys[i];
-            let key_j = keys[j];
-            if !schedules_overlap(&grouped_schedules[&key_i], &grouped_schedules[&key_j]) {
+        for j in (i + 1)..keys.len() {
+            let key_i = keys[i].clone();
+            let key_j = keys[j].clone();
+
+            if !courses_overlap(grouped_courses[&key_i], grouped_courses[&key_j]) {
                 let index_i = node_indices[&key_i];
                 let index_j = node_indices[&key_j];
                 graph.add_edge(index_i, index_j, ());
@@ -58,39 +44,34 @@ pub fn create_compatible_schedules(
         }
     }
 
-    // Find cliques using Bron-Kerbosch algorithm
     let mut cliques = Vec::new();
     let mut r = Vec::new();
     let mut p: HashSet<_> = graph.node_indices().collect();
     let mut x = HashSet::new();
     bron_kerbosch(&graph, &mut r, &mut p, &mut x, &mut cliques);
 
-    // Collect schedules from cliques
     let mut final_schedules = Vec::new();
     for clique in cliques {
         let mut schedule_group = Vec::new();
-        for node_index in clique {
-            let key = graph[node_index];
-            let schedules = grouped_schedules[&key].clone();
-            schedule_group.extend(schedules.into_iter().cloned());
+        let mut materias_incluidas = HashSet::new();
+
+        for node_index in &clique {
+            let key = graph[*node_index].clone();
+            let course = grouped_courses[&key].clone();
+            schedule_group.push(course.clone());
+            materias_incluidas.insert(course.materia.nombre.clone());
         }
-        final_schedules.push(schedule_group);
+
+        if materias_incluidas.len() == course_names.len() {
+            final_schedules.push(schedule_group);
+        }
     }
 
     final_schedules
 }
 
-/// Bron-Kerbosch algorithm to find all maximal cliques in an undirected graph.
-/// 
-/// # Arguments
-/// 
-/// * `graph` - The graph to search for cliques.
-/// * `r` - Current clique.
-/// * `p` - Potential nodes to add to the clique.
-/// * `x` - Nodes already processed.
-/// * `cliques` - Collection of found cliques.
 fn bron_kerbosch(
-    graph: &Graph<(i32, i32), (), Undirected>,
+    graph: &Graph<(String, i32), (), Undirected>,
     r: &mut Vec<NodeIndex>,
     p: &mut HashSet<NodeIndex>,
     x: &mut HashSet<NodeIndex>,
@@ -113,31 +94,21 @@ fn bron_kerbosch(
     }
 }
 
-/// Checks if two sets of schedules overlap.
-/// 
-/// # Arguments
-/// 
-/// * `schedules1` - First set of schedules.
-/// * `schedules2` - Second set of schedules.
-/// 
-/// # Returns
-/// 
-/// `true` if there is an overlap, `false` otherwise.
-fn schedules_overlap(schedules1: &Vec<&CourseSchedule>, schedules2: &Vec<&CourseSchedule>) -> bool {
-    for s1 in schedules1 {
-        for s2 in schedules2 {
-            let days1 = get_days(s1);
-            let days2 = get_days(s2);
+fn courses_overlap(course1: &CourseSchedule, course2: &CourseSchedule) -> bool {
+    for schedule1 in &course1.schedules {
+        for schedule2 in &course2.schedules {
+            if schedule1.dia == schedule2.dia {
+                let start_time1 = parse_time(&schedule1.hora_inicio);
+                let end_time1 = parse_time(&schedule1.hora_fin);
+                let start_time2 = parse_time(&schedule2.hora_inicio);
+                let end_time2 = parse_time(&schedule2.hora_fin);
 
-            let common_days: HashSet<&str> = days1.intersection(&days2).cloned().collect();
-            if !common_days.is_empty() {
-                let start_time1 = NaiveTime::parse_from_str(&s1.hora_inicio, "%H:%M:%S").unwrap();
-                let end_time1 = NaiveTime::parse_from_str(&s1.hora_fin, "%H:%M:%S").unwrap();
-                let start_time2 = NaiveTime::parse_from_str(&s2.hora_inicio, "%H:%M:%S").unwrap();
-                let end_time2 = NaiveTime::parse_from_str(&s2.hora_fin, "%H:%M:%S").unwrap();
-
-                if (start_time1 < end_time2) && (end_time1 > start_time2) {
-                    return true;
+                if let (Some(start_time1), Some(end_time1), Some(start_time2), Some(end_time2)) =
+                    (start_time1, end_time1, start_time2, end_time2)
+                {
+                    if (start_time1 < end_time2) && (end_time1 > start_time2) {
+                        return true;
+                    }
                 }
             }
         }
@@ -145,23 +116,7 @@ fn schedules_overlap(schedules1: &Vec<&CourseSchedule>, schedules2: &Vec<&Course
     false
 }
 
-/// Extracts the days of the week from a schedule.
-/// 
-/// # Arguments
-/// 
-/// * `schedule` - The schedule to extract days from.
-/// 
-/// # Returns
-/// 
-/// A set of strings representing the days of the week.
-fn get_days(schedule: &CourseSchedule) -> HashSet<&str> {
-    let mut days = HashSet::new();
-    if schedule.lunes { days.insert("L"); }
-    if schedule.martes { days.insert("M"); }
-    if schedule.miercoles { days.insert("W"); }
-    if schedule.jueves { days.insert("J"); }
-    if schedule.viernes { days.insert("V"); }
-    if schedule.sabado { days.insert("S"); }
-    if schedule.domingo { days.insert("D"); }
-    days
+fn parse_time(time_str: &str) -> Option<NaiveTime> {
+    NaiveTime::parse_from_str(time_str, "%H:%M:%S").ok()
+        .or_else(|| NaiveTime::parse_from_str(time_str, "%H:%M").ok())
 }

@@ -1,6 +1,6 @@
 from rest_framework import viewsets
-from .models import Curso, Materia, Profesor, Salon
-from .serializers import CursoSerializer, MateriaSerializer, ProfesorSerializer, SalonSerializer
+from .models import Curso, Materia, Profesor, Salon, Schedule
+from .serializers import CursoSerializer, MateriaSerializer, ProfesorSerializer, SalonSerializer, ScheduleSerializer
 from django_filters.rest_framework import DjangoFilterBackend
 from .filters import CursoFilter
 
@@ -21,3 +21,7 @@ class ProfesorViewSet(viewsets.ModelViewSet):
 class SalonViewSet(viewsets.ModelViewSet):
     queryset = Salon.objects.all()
     serializer_class = SalonSerializer
+
+class ScheduleViewSet(viewsets.ModelViewSet):
+    queryset = Schedule.objects.all()
+    serializer_class = ScheduleSerializer
