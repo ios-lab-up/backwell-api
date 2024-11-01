@@ -2,7 +2,7 @@ use actix_web::{web, App, HttpServer, HttpResponse};
 use serde::{Deserialize, Serialize};
 use reqwest::Client;
 use log::{info, error};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use url::Url;
 
@@ -18,7 +18,27 @@ struct GenerateScheduleRequest {
 struct GenerateScheduleResponse {
     response: u16,
     data: Vec<Vec<CourseSchedule>>,
-    schedule_s: HashMap<String, HashMap<String, HashMap<String, String>>>,
+    schedule_s: Vec<ScheduleGroup>,
+    messages: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct ScheduleGroup {
+    courses: Vec<CourseInfo>,
+}
+
+#[derive(Serialize)]
+struct CourseInfo {
+    materia: String,
+    profesor: String,
+    schedules: Vec<ScheduleInfo>,
+}
+
+#[derive(Serialize)]
+struct ScheduleInfo {
+    dia: String,
+    hora_inicio: String,
+    hora_fin: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -87,14 +107,14 @@ async fn generate_schedule(req_body: web::Json<GenerateScheduleRequest>) -> impl
         .unwrap_or_else(|_| "http://web:8000/api/cursos/".to_string());
 
     let mut url = Url::parse(&django_api_base_url).expect("Invalid Django API URL");
-    for course_name in &req_body.courses {
+
+    // Build query to Django to only fetch selected subjects
+    if !req_body.courses.is_empty() {
         url.query_pairs_mut()
-            .append_pair("materia__nombre", course_name);
+            .append_pair("materia__nombre__in", &req_body.courses.join(","));
     }
 
-    let response = client.get(url)
-        .send()
-        .await;
+    let response = client.get(url).send().await;
 
     let courses_data: Vec<CourseSchedule> = match response {
         Ok(resp) => {
@@ -114,38 +134,76 @@ async fn generate_schedule(req_body: web::Json<GenerateScheduleRequest>) -> impl
         }
     };
 
+    let subjects_found: HashSet<String> = courses_data.iter()
+        .map(|course| course.materia.nombre.trim().to_string())
+        .collect();
+    let subjects_requested: HashSet<String> = req_body.courses.iter()
+        .map(|s| s.trim().to_string())
+        .collect();
+
+    let subjects_not_found: Vec<String> = subjects_requested.difference(&subjects_found).cloned().collect();
+    let mut messages = Vec::new();
+
+    if !subjects_not_found.is_empty() {
+        messages.push(format!("Subjects not found: {}", subjects_not_found.join(", ")));
+    }
+
     let compatible_schedules = schedule_utils::create_compatible_schedules(
         &courses_data,
         &req_body.courses,
         req_body.minimum,
     );
 
-    let schedule_s = simplify_schedules(&compatible_schedules);
+    let mut final_schedules = compatible_schedules.clone();
+
+    if final_schedules.is_empty() {
+        if req_body.minimum == 1 {
+            for course in &courses_data {
+                final_schedules.push(vec![course.clone()]);
+            }
+            messages.push("No combinations possible, showing individual courses.".to_string());
+        } else {
+            messages.push("No combinations possible with the requested minimum.".to_string());
+        }
+    }
+
+    let schedule_s = simplify_schedules(&final_schedules);
 
     let response = GenerateScheduleResponse {
         response: 200,
-        data: compatible_schedules,
+        data: final_schedules,
         schedule_s,
+        messages,
     };
 
     HttpResponse::Ok().json(response)
 }
 
-// Simplifies the schedule for the `scheduleS` section
-fn simplify_schedules(schedules: &Vec<Vec<CourseSchedule>>) -> HashMap<String, HashMap<String, HashMap<String, String>>> {
-    let mut result = HashMap::new();
+fn simplify_schedules(schedules: &Vec<Vec<CourseSchedule>>) -> Vec<ScheduleGroup> {
+    let mut result = Vec::new();
 
-    for (i, schedule_group) in schedules.iter().enumerate() {
-        let mut schedule_map = HashMap::new();
+    for schedule_group in schedules {
+        let mut courses_info = Vec::new();
+
         for course in schedule_group {
-            let mut days_map = HashMap::new();
+            let mut schedules_info = Vec::new();
             for sched in &course.schedules {
-                let time_range = format!("{} - {}", sched.hora_inicio, sched.hora_fin);
-                days_map.insert(sched.dia.clone(), time_range);
+                schedules_info.push(ScheduleInfo {
+                    dia: sched.dia.clone(),
+                    hora_inicio: sched.hora_inicio.clone(),
+                    hora_fin: sched.hora_fin.clone(),
+                });
             }
-            schedule_map.insert(course.materia.nombre.clone(), days_map);
+            courses_info.push(CourseInfo {
+                materia: course.materia.nombre.clone(),
+                profesor: course.profesor.nombre.clone(),
+                schedules: schedules_info,
+            });
         }
-        result.insert(format!("horario{}", i + 1), schedule_map);
+
+        result.push(ScheduleGroup {
+            courses: courses_info,
+        });
     }
 
     result
@@ -155,16 +213,15 @@ fn simplify_schedules(schedules: &Vec<Vec<CourseSchedule>>) -> HashMap<String, H
 async fn main() -> std::io::Result<()> {
     env_logger::init();
     let port = 8082;
-    info!("Iniciando servidor en http://0.0.0.0:{}", port);
+    info!("Starting server at http://0.0.0.0:{}", port);
 
     HttpServer::new(|| {
         App::new()
-            .route("/v1/api/generate", web::post().to(generate_schedule))
+            .route("/v1/api/generate_schedule", web::post().to(generate_schedule))
     })
     .bind(("0.0.0.0", port))?
     .run()
     .await?;
 
-    info!("Servidor Actix finalizado"); // Debe mantenerse activo
     Ok(())
 }

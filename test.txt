@@ -1,3 +1,11 @@
+JSON Test
+{
+  "courses":["Ética","Persona y sociedad"],
+  "minimum":1
+}
+URL = https://localhost:8082/v1/api/generate_schedule
+
+
 Check the following code of rust which should get combinations of possible subjects for schedules, the endpoint receives the arrangement of subjects that you want to take and the endpoint should return the possible combinations without the subjects are put on schedules for example if ethics is on Monday from 14:00 to 15: 30 and I want to put chemistry but the class is from 15:00 to 16:30 it could not be a possibility since they overlap for that is compared with other courses of chemistry or if there is not there then only send the schedule with a subject depending on which is the same minimum specified in the post, in the same way it verifies that the response of the endpoint the rust is in this way:
 response (already does it)
 data (already does it)
@@ -555,3 +563,376 @@ petgraph = "0.6.5"
 env_logger = "0.9"
 log = "0.4"
 url = "2.2.2"
+
+
+SUGGESTIONS
+
+**Summary:**
+
+You've requested several improvements to your Rust application that interfaces with a Django API:
+
+1. **Adjust the Django API Request:** Modify the request from Rust to Django to only retrieve the selected subjects, avoiding unnecessary data transfer.
+
+2. **Handle Missing Subjects:** If some subjects are not found (due to typos or unavailability), return informative messages indicating which subjects were not found.
+
+3. **Manage No Combination Scenarios:** If no schedule combinations are possible (due to overlapping times), handle this by either returning overlapped schedules with a message or providing individual schedules based on the `minimum` specified.
+
+4. **Improve the Schedule Response Format:** Modify the `schedule_s` in the response to include detailed schedule information (day, start time, end time) in a more user-friendly format for the frontend.
+
+5. **Change the Endpoint Path:** Update the endpoint path to `/v1/api/generate_schedule`.
+
+Below, I've provided the updated code with explanations to address each of these points.
+
+---
+
+## **1. Adjust the Django API Request**
+
+### **1.1 Modify the Request to Only Fetch Selected Subjects**
+
+**Changes in `main.rs`:**
+
+```rust
+// Build the query parameters using 'materia__nombre__in'
+if !req_body.courses.is_empty() {
+    url.query_pairs_mut()
+        .append_pair("materia__nombre__in", &req_body.courses.join(","));
+}
+```
+
+**Explanation:**
+
+- We're using the `materia__nombre__in` parameter to pass a comma-separated list of subjects.
+- This ensures the Django API only returns courses for the selected subjects.
+- Make sure your Django `CursoFilter` is updated to handle `materia__nombre__in`.
+
+**Changes in Django (`filters.py`):**
+
+```python
+import django_filters
+from .models import Curso
+
+class CursoFilter(django_filters.FilterSet):
+    materia__nombre__in = django_filters.BaseInFilter(field_name='materia__nombre')
+
+    class Meta:
+        model = Curso
+        fields = ['materia__nombre__in']
+```
+
+---
+
+## **2. Handle Missing Subjects**
+
+### **2.1 Check for Missing Subjects and Return Messages**
+
+**Changes in `main.rs`:**
+
+```rust
+// After receiving 'courses_data' from Django
+let subjects_found: HashSet<String> = courses_data.iter()
+    .map(|course| course.materia.nombre.trim().to_string())
+    .collect();
+
+let subjects_requested: HashSet<String> = req_body.courses.iter()
+    .map(|s| s.trim().to_string())
+    .collect();
+
+let subjects_not_found: Vec<String> = subjects_requested.difference(&subjects_found).cloned().collect();
+
+let mut messages = Vec::new();
+
+if !subjects_not_found.is_empty() {
+    messages.push(format!("Subjects not found: {}", subjects_not_found.join(", ")));
+}
+```
+
+**Explanation:**
+
+- We create sets of subjects found and subjects requested to identify any discrepancies.
+- If any subjects are not found, we add a message to the `messages` vector.
+
+---
+
+## **3. Manage No Combination Scenarios**
+
+### **3.1 Adjust Logic for No Possible Combinations**
+
+**Changes in `main.rs`:**
+
+```rust
+let compatible_schedules = schedule_utils::create_compatible_schedules(
+    &courses_data,
+    &req_body.courses,
+    req_body.minimum,
+);
+
+let mut final_schedules = compatible_schedules.clone();
+
+if final_schedules.is_empty() {
+    // No combinations found
+    if req_body.minimum == 1 {
+        // Return schedules with individual courses
+        for course in &courses_data {
+            final_schedules.push(vec![course.clone()]);
+        }
+        messages.push("No combinations possible, showing individual courses.".to_string());
+    } else {
+        // Return overlapping schedules (not possible)
+        messages.push("No combinations possible with the requested minimum.".to_string());
+    }
+}
+```
+
+**Explanation:**
+
+- If no compatible schedules are found, we check the `minimum` value.
+- For `minimum == 1`, we provide schedules with individual courses.
+- For higher minimums, we return an informative message.
+
+---
+
+## **4. Improve the Schedule Response Format**
+
+### **4.1 Modify `simplify_schedules` Function**
+
+**Changes in `main.rs`:**
+
+```rust
+fn simplify_schedules(schedules: &Vec<Vec<CourseSchedule>>) -> Vec<ScheduleGroup> {
+    let mut result = Vec::new();
+
+    for schedule_group in schedules {
+        let mut courses_info = Vec::new();
+
+        for course in schedule_group {
+            let mut schedules_info = Vec::new();
+            for sched in &course.schedules {
+                schedules_info.push(ScheduleInfo {
+                    dia: sched.dia.clone(),
+                    hora_inicio: sched.hora_inicio.clone(),
+                    hora_fin: sched.hora_fin.clone(),
+                });
+            }
+            courses_info.push(CourseInfo {
+                materia: course.materia.nombre.clone(),
+                profesor: course.profesor.nombre.clone(),
+                schedules: schedules_info,
+            });
+        }
+
+        result.push(ScheduleGroup {
+            courses: courses_info,
+        });
+    }
+
+    result
+}
+
+#[derive(Serialize)]
+struct GenerateScheduleResponse {
+    response: u16,
+    data: Vec<Vec<CourseSchedule>>,
+    schedule_s: Vec<ScheduleGroup>,
+    messages: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct ScheduleGroup {
+    courses: Vec<CourseInfo>,
+}
+
+#[derive(Serialize)]
+struct CourseInfo {
+    materia: String,
+    profesor: String,
+    schedules: Vec<ScheduleInfo>,
+}
+
+#[derive(Serialize)]
+struct ScheduleInfo {
+    dia: String,
+    hora_inicio: String,
+    hora_fin: String,
+}
+```
+
+**Explanation:**
+
+- The `simplify_schedules` function now structures the schedule data in a clear, hierarchical format.
+- This format includes detailed schedule information suitable for frontend display.
+
+---
+
+## **5. Change the Endpoint Path**
+
+### **5.1 Update the Route in Actix Web**
+
+**Changes in `main.rs`:**
+
+```rust
+HttpServer::new(|| {
+    App::new()
+        .route("/v1/api/generate_schedule", web::post().to(generate_schedule))
+})
+```
+
+**Explanation:**
+
+- The endpoint path is updated to `/v1/api/generate_schedule` as requested.
+
+---
+
+## **6. Full Updated `main.rs` Code**
+
+```rust
+use actix_web::{web, App, HttpServer, HttpResponse};
+use serde::{Deserialize, Serialize};
+use reqwest::Client;
+use log::{info, error};
+use std::collections::{HashMap, HashSet};
+use std::env;
+use url::Url;
+
+mod schedule_utils;
+
+#[derive(Deserialize)]
+struct GenerateScheduleRequest {
+    courses: Vec<String>,
+    minimum: usize,
+}
+
+#[derive(Serialize)]
+struct GenerateScheduleResponse {
+    response: u16,
+    data: Vec<Vec<CourseSchedule>>,
+    schedule_s: Vec<ScheduleGroup>,
+    messages: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct ScheduleGroup {
+    courses: Vec<CourseInfo>,
+}
+
+#[derive(Serialize)]
+struct CourseInfo {
+    materia: String,
+    profesor: String,
+    schedules: Vec<ScheduleInfo>,
+}
+
+#[derive(Serialize)]
+struct ScheduleInfo {
+    dia: String,
+    hora_inicio: String,
+    hora_fin: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct CourseSchedule {
+    // ... existing fields ...
+}
+
+// ... existing structs for Schedule, Materia, Profesor, Salon ...
+
+async fn generate_schedule(req_body: web::Json<GenerateScheduleRequest>) -> impl actix_web::Responder {
+    // ... existing code for building the Django API request ...
+
+    // Check which subjects were found
+    let subjects_found: HashSet<String> = courses_data.iter()
+        .map(|course| course.materia.nombre.trim().to_string())
+        .collect();
+
+    let subjects_requested: HashSet<String> = req_body.courses.iter()
+        .map(|s| s.trim().to_string())
+        .collect();
+
+    let subjects_not_found: Vec<String> = subjects_requested.difference(&subjects_found).cloned().collect();
+
+    let mut messages = Vec::new();
+
+    if !subjects_not_found.is_empty() {
+        messages.push(format!("Subjects not found: {}", subjects_not_found.join(", ")));
+    }
+
+    // ... existing code for creating compatible schedules ...
+
+    // Adjust logic for no possible combinations
+    if final_schedules.is_empty() {
+        if req_body.minimum == 1 {
+            for course in &courses_data {
+                final_schedules.push(vec![course.clone()]);
+            }
+            messages.push("No combinations possible, showing individual courses.".to_string());
+        } else {
+            messages.push("No combinations possible with the requested minimum.".to_string());
+        }
+    }
+
+    let schedule_s = simplify_schedules(&final_schedules);
+
+    let response = GenerateScheduleResponse {
+        response: 200,
+        data: final_schedules,
+        schedule_s,
+        messages,
+    };
+
+    HttpResponse::Ok().json(response)
+}
+
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    env_logger::init();
+    let port = 8082;
+    info!("Starting server at http://0.0.0.0:{}", port);
+
+    HttpServer::new(|| {
+        App::new()
+            .route("/v1/api/generate_schedule", web::post().to(generate_schedule))
+    })
+    .bind(("0.0.0.0", port))?
+    .run()
+    .await?;
+
+    Ok(())
+}
+```
+
+---
+
+## **7. Additional Considerations**
+
+### **7.1 Error Handling**
+
+- Ensure that any errors during the request to the Django API are properly logged and returned.
+- Handle potential parsing errors when dealing with time formats in schedules.
+
+### **7.2 Frontend Compatibility**
+
+- The new `schedule_s` structure is designed to be easily parsed and displayed by the frontend.
+- Each course in the schedule includes detailed timing information.
+
+### **7.3 Testing**
+
+- Test the API with various inputs, including subjects that don't exist, to verify that messages are returned correctly.
+- Check that when no combinations are possible, the API responds as expected based on the `minimum` value.
+
+---
+
+**Conclusion:**
+
+The provided code updates address all the requested changes:
+
+- **Efficient Data Retrieval:** By modifying the request to the Django API, only the selected subjects are fetched.
+
+- **Informative Responses:** The API now returns messages when subjects are not found or when no schedule combinations are possible.
+
+- **User-Friendly Schedule Data:** The `schedule_s` field in the response is structured for easy consumption by the frontend.
+
+- **Endpoint Update:** The API endpoint has been changed to `/v1/api/generate_schedule`.
+
+If you have further questions or need additional assistance, feel free to ask!
+
+
+Check if the SUGGESTIONS are okay and send the complete code of the rust file to check it and test it with the django api.
