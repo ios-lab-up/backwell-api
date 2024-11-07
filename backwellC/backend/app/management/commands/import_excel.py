@@ -13,15 +13,12 @@ class Command(BaseCommand):
     def handle(self, *args, **kwargs):
         try:
             excel_file_path = os.path.join(settings.BASE_DIR, 'Schedule.xlsx')
-            self.stdout.write(f"Buscando el archivo Excel en: {excel_file_path}")
             try:
                 df = pd.read_excel(excel_file_path)
             except Exception as e:
                 self.stdout.write(self.style.ERROR(f"Error al leer el archivo Excel: {e}"))
                 return
 
-            # Imprimir los nombres de las columnas para verificar
-            print("Columnas del DataFrame:", df.columns.tolist())
 
             # Preprocesar el DataFrame
             df.fillna('', inplace=True)
