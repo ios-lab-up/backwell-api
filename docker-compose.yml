@@ -1,0 +1,56 @@
+version: '3.9'
+
+services:
+  db:
+    image: postgres:14
+    restart: always
+    environment:
+      POSTGRES_USER: backwell_user
+      POSTGRES_PASSWORD: backwell_password
+      POSTGRES_DB: backwell_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    ports:
+      - "5433:5432"
+
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - "8080:8080"
+
+  web:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: sh -c "./entrypoint.sh"
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8001:8000"
+    depends_on:
+      - db
+    environment:
+      - DEBUG=1
+      - DB_NAME=backwell_db
+      - DB_USER=backwell_user
+      - DB_PASSWORD=backwell_password
+      - DB_HOST=db
+      - DB_PORT=5432
+
+  rust_app:
+    build:
+      context: ./backwellApi
+      dockerfile: Dockerfile
+    container_name: rust_app
+    environment:
+      - RUST_BACKTRACE=1
+      - RUST_LOG=debug
+      - DJANGO_API_URL=http://web:8000/api/cursos/
+    ports:
+      - "8082:8082"
+    depends_on:
+      - web
+
+volumes:
+  postgres_data:

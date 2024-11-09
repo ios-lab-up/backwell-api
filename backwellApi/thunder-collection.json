@@ -1,0 +1,71 @@
+{
+    "client": "Thunder Client",
+    "collectionName": "API Rust Schedule Generator",
+    "dateExported": "2023-10-18T00:00:00.000Z",
+    "version": "1.1",
+    "folders": [],
+    "requests": [
+      {
+        "requestName": "Cargar Datos (Excel)",
+        "url": "http://localhost:8080/api/class_loader/load",
+        "method": "POST",
+        "headers": [],
+        "bodyType": "formdata",
+        "contentType": "multipart/form-data",
+        "formData": [
+          {
+            "name": "file",
+            "value": "",
+            "type": "file",
+            "description": "Selecciona el archivo Excel a cargar"
+          }
+        ],
+        "testScript": "",
+        "auth": {
+          "type": "noauth"
+        },
+        "metaSortKey": -1624248754575,
+        "id": "bdc6f887-9bfa-4d73-81ca-3bfe5e3d7e9d"
+      },
+      {
+        "requestName": "Obtener Horarios",
+        "url": "http://localhost:8080/api/class_loader/get_schedules",
+        "method": "GET",
+        "headers": [],
+        "body": "",
+        "testScript": "",
+        "auth": {
+          "type": "noauth"
+        },
+        "metaSortKey": -1624248754574,
+        "id": "c92b781d-36b9-4a74-b8b7-d3ab2e739a6c"
+      },
+      {
+        "requestName": "Generar Horarios",
+        "url": "http://localhost:8080/api/schedule_generator/generate",
+        "method": "POST",
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "bodyType": "json",
+        "body": {
+          "courses": [
+            "Nombre del Curso 1",
+            "Nombre del Curso 2",
+            "Nombre del Curso 3"
+          ],
+          "minimum": 3
+        },
+        "testScript": "",
+        "auth": {
+          "type": "noauth"
+        },
+        "metaSortKey": -1624248754573,
+        "id": "efb1ec7b-6f88-4b75-93de-1dfe0cfe4c99"
+      }
+    ]
+  }
+  

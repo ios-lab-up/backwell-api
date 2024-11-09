@@ -1,0 +1,17 @@
+rust
+
+https://localhost:8082/v1/api/generate_schedule
+
+JSON Test
+{
+  "courses":["Ética","Persona y sociedad"],
+  "minimum":1
+}
+
+
+django
+
+Cursos = http://localhost:8001/api/cursos
+Profesores = http://localhost:8001/api/profesores
+Materias = http://localhost:8001/api/materias
+Salones = http://localhost:8001/api/salones
