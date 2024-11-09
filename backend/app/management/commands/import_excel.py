@@ -19,8 +19,9 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.ERROR(f"Error al leer el archivo Excel: {e}"))
                 return
 
-
-            # Preprocesar el DataFrame
+            # Preprocess the DataFrame
+            for column in df.select_dtypes(include=['float64']).columns:
+                df[column] = df[column].astype(object)  # Convert columns to object type to allow string replacement
             df.fillna('', inplace=True)
 
             # Agrupar por 'No de clase' y 'Profesor'
