@@ -231,8 +231,8 @@ This project is licensed under the [MIT License](LICENSE).
 
 For any inquiries or support, please contact:
 
-- **Email**: [support@backwellapi.com](mailto:support@backwellapi.com)
-- **GitHub**: [@your-username](https://github.com/your-username)
+- **Email**: [isiguenza@up.edu.mx](mailto:isiguenza@up.edu.mx)
+- **GitHub**: [@JavierRangel2004](https://github.com/JavierRangel2004)
 
 ---
 
