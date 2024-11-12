@@ -2,7 +2,7 @@ use actix_web::{web, App, HttpServer, HttpResponse};
 use serde::{Deserialize, Serialize};
 use reqwest::Client;
 use log::{info, error};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::env;
 use url::Url;
 
@@ -212,6 +212,7 @@ fn simplify_schedules(schedules: &Vec<Vec<CourseSchedule>>) -> Vec<ScheduleGroup
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     env_logger::init();
+    println!("Server is starting..."); // <-- Add this line
     let port = 8082;
     info!("Starting server at http://0.0.0.0:{}", port);
 
