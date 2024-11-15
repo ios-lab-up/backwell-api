@@ -25,9 +25,9 @@ class Salon(models.Model):
         return self.nombre
 
 class Curso(models.Model):
-    id_del_curso = models.IntegerField(verbose_name='Id del Curso')
-    ciclo = models.IntegerField(verbose_name='Ciclo')
-    sesion = models.CharField(max_length=50, verbose_name='Sesión')
+    id_del_curso = models.CharField(max_length=50, verbose_name='Id del Curso')
+    ciclo = models.CharField(max_length=50, verbose_name='Ciclo', blank=True, null=True)
+    sesion = models.CharField(max_length=50, verbose_name='Sesión', blank=True, null=True)
     seccion_clase = models.CharField(max_length=100, verbose_name='Sección Clase', blank=True, null=True)
     grupo_academico = models.CharField(max_length=100, verbose_name='Grupo académico', blank=True, null=True)
     organizacion_academica = models.CharField(max_length=100, verbose_name='Organización académica', blank=True, null=True)
@@ -45,7 +45,7 @@ class Curso(models.Model):
     capacidad_inscripcion_combinacion = models.IntegerField(verbose_name='Capacidad Inscripción Combinación', blank=True, null=True)
     no_de_catalogo = models.CharField(max_length=50, verbose_name='No de catálogo', blank=True, null=True)
     clase = models.CharField(max_length=100, verbose_name='Clase', blank=True, null=True)
-    no_de_clase = models.IntegerField(verbose_name='No de clase')
+    no_de_clase = models.CharField(max_length=50, verbose_name='No de clase')
     capacidad_inscripcion = models.IntegerField(verbose_name='Capacidad Inscripción', blank=True, null=True)
     total_inscripciones = models.IntegerField(verbose_name='Total inscripciones', blank=True, null=True)
     total_inscripciones_materia_combinada = models.IntegerField(verbose_name='Total de inscripciones materia combinada', blank=True, null=True)
