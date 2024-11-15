@@ -1,5 +1,7 @@
+// backwellApi/src/main.rs
+
 use actix_web::{web, App, HttpServer, HttpResponse};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Deserializer};
 use reqwest::Client;
 use log::{info, error};
 use std::collections::HashSet;
@@ -45,32 +47,44 @@ struct ScheduleInfo {
 struct CourseSchedule {
     id: i32,
     materia: Materia,
-    profesor: Profesor,
+    #[serde(deserialize_with = "deserialize_profesor")]
+    profesor: Option<Profesor>,
+    #[serde(deserialize_with = "deserialize_profesor")]
+    adjunto: Option<Profesor>,
     schedules: Vec<Schedule>,
-    id_del_curso: i32,
-    ciclo: i32,
+    id_del_curso: String,
+    ciclo: String,
     sesion: String,
-    mat_comb: i32,
-    clases_comb: String,
-    capacidad_inscripcion_combinacion: i32,
-    no_de_catalogo: String,
-    clase: String,
-    no_de_clase: i32,
+    seccion_clase: Option<String>,
+    grupo_academico: Option<String>,
+    organizacion_academica: Option<String>,
+    intercambio: Option<String>,
+    inter_plantel: Option<String>,
+    oficialidad_materia: Option<String>,
+    plan_academico: Option<String>,
+    sede: Option<String>,
+    id_administrador_curso: Option<String>,
+    nombre_administrador_curso: Option<String>,
+    mat_comb: Option<String>,
+    clases_comb: Option<String>,
+    capacidad_inscripcion_combinacion: Option<i32>,
+    no_de_catalogo: Option<String>,
+    clase: Option<String>,
+    no_de_clase: String,
     capacidad_inscripcion: i32,
     total_inscripciones: i32,
     total_inscripciones_materia_combinada: i32,
-    fecha_inicial: String,
-    fecha_final: String,
-    bloque_optativo: String,
+    fecha_inicial: Option<String>,
+    fecha_final: Option<String>,
+    bloque_optativo: Option<String>,
     idioma_impartido: Option<String>,
-    modalidad_clase: String,
+    modalidad_clase: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct Schedule {
     id: i32,
     salon: Salon,
-    profesor: Profesor,
     dia: String,
     hora_inicio: String,
     hora_fin: String,
@@ -85,11 +99,40 @@ struct Materia {
     codigo: Option<String>,
 }
 
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct Profesor {
     id: i32,
-    nombre: String,
+    nombre: Option<String>,
+    id_profesor: Option<String>,
 }
+
+// Custom deserializer for `Option<Profesor>` field
+fn deserialize_profesor<'de, D>(deserializer: D) -> Result<Option<Profesor>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum ProfesorOrId {
+        Null,                    // Handle `null` values
+        Id(i32),
+        Object(Profesor),
+    }
+
+    match ProfesorOrId::deserialize(deserializer)? {
+        ProfesorOrId::Null => Ok(None), // `null` maps to `None`
+        ProfesorOrId::Id(id) => Ok(Some(Profesor {
+            id,
+            nombre: None,
+            id_profesor: None,
+        })),
+        ProfesorOrId::Object(profesor) => Ok(Some(profesor)),
+    }
+}
+
+
+
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct Salon {
@@ -196,9 +239,11 @@ fn simplify_schedules(schedules: &Vec<Vec<CourseSchedule>>) -> Vec<ScheduleGroup
             }
             courses_info.push(CourseInfo {
                 materia: course.materia.nombre.clone(),
-                profesor: course.profesor.nombre.clone(),
+                profesor: course.profesor.as_ref()
+                    .and_then(|p| p.nombre.clone())
+                    .unwrap_or_else(|| "Unknown".to_string()), // Default to "Unknown" if `profesor` is `None`
                 schedules: schedules_info,
-            });
+            });                        
         }
 
         result.push(ScheduleGroup {
@@ -212,7 +257,7 @@ fn simplify_schedules(schedules: &Vec<Vec<CourseSchedule>>) -> Vec<ScheduleGroup
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     env_logger::init();
-    println!("Server is starting..."); // <-- Add this line
+    println!("Server is starting...");
     let port = 8082;
     info!("Starting server at http://0.0.0.0:{}", port);
 

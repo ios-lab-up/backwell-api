@@ -12,19 +12,21 @@ pub fn create_compatible_schedules(
     _minimum: usize,
 ) -> Vec<Vec<CourseSchedule>> {
     let filtered_courses: Vec<&CourseSchedule> = all_courses.iter()
-    .filter(|s| course_names.contains(&s.materia.nombre.trim().to_string()))
-    .collect();
+        .filter(|s| course_names.contains(&s.materia.nombre.trim().to_string()))
+        .collect();
 
     let mut grouped_courses: HashMap<(String, i32), &CourseSchedule> = HashMap::new();
     for course in filtered_courses {
-        let key = (course.materia.nombre.clone(), course.profesor.id);
+        let key = (
+            course.materia.nombre.clone(),
+            course.profesor.as_ref().map_or(-1, |p| p.id), // Default to -1 if `profesor` is None
+        );                
         grouped_courses.insert(key.clone(), course);
     }
 
     let mut graph = Graph::<(String, i32), (), Undirected>::default();
     let mut node_indices = HashMap::new();
 
-    // Corregido: eliminar '&' en el bucle
     for key in grouped_courses.keys() {
         let index = graph.add_node(key.clone());
         node_indices.insert(key.clone(), index);
