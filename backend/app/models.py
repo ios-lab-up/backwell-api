@@ -1,5 +1,4 @@
 # backend/app/models.py
-
 from django.db import models
 
 class Materia(models.Model):
@@ -38,7 +37,6 @@ class Curso(models.Model):
     sede = models.CharField(max_length=100, blank=True, null=True)
     id_administrador_curso = models.CharField(max_length=50, blank=True, null=True)
     nombre_administrador_curso = models.CharField(max_length=255, blank=True, null=True)
-    rol_profesor = models.CharField(max_length=100, blank=True, null=True, verbose_name='Rol Profesor')
     materia = models.ForeignKey(Materia, on_delete=models.CASCADE, verbose_name='Materia')
     mat_comb = models.CharField(max_length=255, verbose_name='Mat. Comb.', blank=True, null=True)
     clases_comb = models.CharField(max_length=255, verbose_name='Clases Comb.', blank=True, null=True)
@@ -54,7 +52,8 @@ class Curso(models.Model):
     bloque_optativo = models.CharField(max_length=50, verbose_name='Bloque optativo', blank=True, null=True)
     idioma_impartido = models.CharField(max_length=50, blank=True, null=True, verbose_name='Idioma en que se imparte la materia')
     modalidad_clase = models.CharField(max_length=50, blank=True, null=True, verbose_name='Modalidad de la clase')
-    profesor = models.ForeignKey(Profesor, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='Profesor')
+    profesor = models.ForeignKey(Profesor, on_delete=models.SET_NULL, null=True, blank=True, related_name='cursos_titular', verbose_name='Profesor Titular')
+    adjunto = models.ForeignKey(Profesor, on_delete=models.SET_NULL, null=True, blank=True, related_name='cursos_adjunto', verbose_name='Profesor Adjunto')
 
     def __str__(self):
         return f"Curso {self.id_del_curso} - {self.materia.nombre} - Clase {self.no_de_clase}"
@@ -81,7 +80,6 @@ class Schedule(models.Model):
     hora_inicio = models.TimeField(verbose_name='Hora inicio')
     hora_fin = models.TimeField(verbose_name='Hora fin')
     salon = models.ForeignKey(Salon, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='Salón')
-    profesor = models.ForeignKey(Profesor, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='Profesor')
 
     def __str__(self):
         return f"{self.dia} {self.hora_inicio.strftime('%H:%M')} - {self.hora_fin.strftime('%H:%M')}"

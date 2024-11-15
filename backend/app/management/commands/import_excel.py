@@ -41,6 +41,7 @@ class Command(BaseCommand):
                 id_profesor = str(row['Id profesor']).strip() if 'Id profesor' in row else ''
                 rol_profesor = str(row['Rol Profesor']).strip() if 'Rol Profesor' in row else ''
 
+                # Obtener o crear el registro del profesor
                 profesor, _ = Profesor.objects.get_or_create(
                     nombre=profesor_nombre,
                     defaults={'id_profesor': id_profesor}
@@ -51,6 +52,7 @@ class Command(BaseCommand):
                     # Saltar filas sin nombre de materia
                     continue
 
+                # Obtener o crear la materia
                 materia, _ = Materia.objects.get_or_create(
                     nombre=materia_nombre,
                     defaults={
@@ -92,6 +94,7 @@ class Command(BaseCommand):
                         capacidad_comb_col = df.columns[df.columns.str.contains('Capacidad', case=False)].tolist()
                         capacidad_comb_col = capacidad_comb_col[0] if capacidad_comb_col else ''
 
+                    # Crear los datos del curso
                     curso_data = {
                         'id_del_curso': str(row['Id del Curso']),
                         'ciclo': str(row['Ciclo']),
@@ -106,7 +109,6 @@ class Command(BaseCommand):
                         'sede': str(row['Sede']),
                         'id_administrador_curso': str(row['Id Administrador de curso']),
                         'nombre_administrador_curso': str(row['Nombre de Administrador de curso']),
-                        'rol_profesor': rol_profesor,
                         'materia': materia,
                         'mat_comb': str(row['Mat. Comb.']),
                         'clases_comb': clases_comb_value,
@@ -122,17 +124,23 @@ class Command(BaseCommand):
                         'bloque_optativo': str(row['Bloque optativo']),
                         'idioma_impartido': idioma_impartido,
                         'modalidad_clase': str(row['Modalidad de la clase']),
-                        'profesor': profesor,
                     }
 
+                    # Crear o actualizar el curso en la base de datos
                     curso, _ = Curso.objects.get_or_create(
                         no_de_clase=curso_data['no_de_clase'],
-                        profesor=profesor,
                         defaults=curso_data
                     )
 
                     # Agregar el curso al diccionario
                     courses_by_id[course_identifier] = curso
+
+                # Asignar el profesor titular o adjunto al curso según sea necesario
+                if rol_profesor.lower() == 'titular':
+                    curso.profesor = profesor
+                elif rol_profesor.lower() == 'adjunto':
+                    curso.adjunto = profesor
+                curso.save()
 
                 # Procesar el horario de la fila actual
                 days = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
@@ -178,14 +186,13 @@ class Command(BaseCommand):
                             defaults={'capacidad': row.get('Capacidad del salón', None)}
                         )
 
-                        # Crear o actualizar horario
+                        # Crear o actualizar el horario
                         Schedule.objects.get_or_create(
                             curso=curso,
                             dia=dia,
                             hora_inicio=hora_inicio_dt,
                             hora_fin=hora_fin_dt,
-                            salon=salon,
-                            profesor=profesor
+                            salon=salon
                         )
 
             self.stdout.write(self.style.SUCCESS('Todos los datos han sido importados exitosamente'))
