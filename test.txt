@@ -1,0 +1,4 @@
+{
+  "courses":["Programación Avanzada","Álgebra Lineal","Mecánica","Inteligencia Artificial","Cálculo Vectorial","Gestión de la Calidad","Taller de Diseño para la Sust.","Dirección de Empresas"],
+  "minimum":6
+}
