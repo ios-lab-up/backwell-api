@@ -20,7 +20,6 @@ class SalonSerializer(serializers.ModelSerializer):
 
 class ScheduleSerializer(serializers.ModelSerializer):
     salon = SalonSerializer()
-    profesor = ProfesorSerializer()
 
     class Meta:
         model = Schedule
