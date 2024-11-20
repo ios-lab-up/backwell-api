@@ -15,6 +15,11 @@ class Command(BaseCommand):
 
     def handle(self, *args, **kwargs):
         try:
+            # Check if the database is empty, if it is populate it with the data from the Excel file if not skip the process and dont import the data
+            if Curso.objects.exists():
+                self.stdout.write(self.style.WARNING('La base de datos ya contiene datos, no se importará nada'))
+                return
+
             excel_file_path = os.path.join(settings.BASE_DIR, 'Schedule.xlsx')
             try:
                 # Leer el Excel, ajustando el número de fila del encabezado según sea necesario

@@ -1,4 +1,5 @@
 {
   "courses":["Programación Avanzada","Álgebra Lineal","Mecánica","Inteligencia Artificial","Cálculo Vectorial","Gestión de la Calidad","Taller de Diseño para la Sust.","Dirección de Empresas"],
-  "minimum":6
+  "minimum":6,
+  "professors":["Bernabe López,Eduardo","Santiago Cortés,María Elizabeth Adriana"]
 }
