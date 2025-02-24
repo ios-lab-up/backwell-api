@@ -38,4 +38,4 @@ COPY --from=builder /app/target/release/backwellApi /usr/local/bin/backwellApi
 EXPOSE 8082
 
 # Ejecutar la aplicación
-ENTRYPOINT ["/usr/local/bin/backwellApi"]
+CMD ["/usr/local/bin/backwellApi"]

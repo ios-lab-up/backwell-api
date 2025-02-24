@@ -8,5 +8,5 @@ class CursoAdmin(admin.ModelAdmin):
 
 @admin.register(Schedule)
 class ScheduleAdmin(admin.ModelAdmin):
-    list_display = ('curso', 'dia', 'hora_inicio', 'hora_fin', 'salon', 'profesor')
-    search_fields = ('curso__id_del_curso', 'dia', 'salon__nombre', 'profesor__nombre')
+    list_display = ('curso', 'dia', 'hora_inicio', 'hora_fin', 'salon')
+    search_fields = ('curso__id_del_curso', 'dia', 'salon__nombre')

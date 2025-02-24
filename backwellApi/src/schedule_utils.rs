@@ -1,97 +1,147 @@
 // backwellApi/src/schedule_utils.rs
 
 use crate::CourseSchedule;
-use chrono::NaiveTime;
-use petgraph::graph::{Graph, NodeIndex};
-use petgraph::Undirected;
 use std::collections::{HashMap, HashSet};
+
+const MAX_COMBINATIONS: usize = 100;
 
 pub fn create_compatible_schedules(
     all_courses: &Vec<CourseSchedule>,
     course_names: &Vec<String>,
-    _minimum: usize,
+    professors: &Option<Vec<String>>,
+    minimum: usize,
 ) -> Vec<Vec<CourseSchedule>> {
-    let filtered_courses: Vec<&CourseSchedule> = all_courses.iter()
-    .filter(|s| course_names.contains(&s.materia.nombre.trim().to_string()))
-    .collect();
+    let mut courses_by_name: HashMap<String, Vec<&CourseSchedule>> = HashMap::new();
 
-    let mut grouped_courses: HashMap<(String, i32), &CourseSchedule> = HashMap::new();
-    for course in filtered_courses {
-        let key = (course.materia.nombre.clone(), course.profesor.id);
-        grouped_courses.insert(key.clone(), course);
+    for course in all_courses {
+        let name = course.materia.nombre.trim().to_string();
+        if course_names.contains(&name) {
+            courses_by_name.entry(name).or_default().push(course);
+        }
     }
 
-    let mut graph = Graph::<(String, i32), (), Undirected>::default();
-    let mut node_indices = HashMap::new();
-
-    // Corregido: eliminar '&' en el bucle
-    for key in grouped_courses.keys() {
-        let index = graph.add_node(key.clone());
-        node_indices.insert(key.clone(), index);
-    }
-
-    let keys: Vec<(String, i32)> = grouped_courses.keys().cloned().collect();
-    for i in 0..keys.len() {
-        for j in (i + 1)..keys.len() {
-            let key_i = keys[i].clone();
-            let key_j = keys[j].clone();
-
-            if !courses_overlap(grouped_courses[&key_i], grouped_courses[&key_j]) {
-                let index_i = node_indices[&key_i];
-                let index_j = node_indices[&key_j];
-                graph.add_edge(index_i, index_j, ());
+    // Collect professors present in data
+    let mut professors_in_data = HashSet::new();
+    for course in all_courses {
+        if let Some(prof) = &course.profesor {
+            if let Some(prof_name) = &prof.nombre {
+                professors_in_data.insert(prof_name.trim().to_string());
             }
         }
     }
 
-    let mut cliques = Vec::new();
-    let mut r = Vec::new();
-    let mut p: HashSet<_> = graph.node_indices().collect();
-    let mut x = HashSet::new();
-    bron_kerbosch(&graph, &mut r, &mut p, &mut x, &mut cliques);
-
-    let mut final_schedules = Vec::new();
-    for clique in cliques {
-        let mut schedule_group = Vec::new();
-        let mut materias_incluidas = HashSet::new();
-
-        for node_index in &clique {
-            let key = graph[*node_index].clone();
-            let course = grouped_courses[&key].clone();
-            schedule_group.push(course.clone());
-            materias_incluidas.insert(course.materia.nombre.clone());
-        }
-
-        if materias_incluidas.len() == course_names.len() {
-            final_schedules.push(schedule_group);
+    if let Some(professors_list) = professors {
+        let professors_list_trimmed: HashSet<String> =
+            professors_list.iter().map(|p| p.trim().to_string()).collect();
+        let missing_professors: HashSet<_> = professors_list_trimmed
+            .difference(&professors_in_data)
+            .cloned()
+            .collect();
+        if !missing_professors.is_empty() {
+            return Vec::new();
         }
     }
 
-    final_schedules
+    let mut course_lists: Vec<Vec<&CourseSchedule>> = Vec::new();
+    for name in course_names {
+        if let Some(courses) = courses_by_name.get(name) {
+            course_lists.push(courses.clone());
+        } else {
+            return Vec::new();
+        }
+    }
+
+    let mut results = Vec::new();
+    let mut current_combination = Vec::new();
+
+    generate_combinations(
+        &course_lists,
+        &mut current_combination,
+        0,
+        &mut results,
+        professors,
+        minimum,
+    );
+
+    results
 }
 
-fn bron_kerbosch(
-    graph: &Graph<(String, i32), (), Undirected>,
-    r: &mut Vec<NodeIndex>,
-    p: &mut HashSet<NodeIndex>,
-    x: &mut HashSet<NodeIndex>,
-    cliques: &mut Vec<Vec<NodeIndex>>,
+fn generate_combinations<'a>(
+    course_lists: &'a [Vec<&'a CourseSchedule>],
+    current_combination: &mut Vec<&'a CourseSchedule>,
+    index: usize,
+    results: &mut Vec<Vec<CourseSchedule>>,
+    professors: &Option<Vec<String>>,
+    minimum: usize,
 ) {
-    if p.is_empty() && x.is_empty() {
-        cliques.push(r.clone());
-    } else {
-        let mut p_vec: Vec<NodeIndex> = p.iter().cloned().collect();
-        while let Some(v) = p_vec.pop() {
-            r.push(v);
-            let neighbors: HashSet<_> = graph.neighbors(v).collect();
-            let mut p_new = p.intersection(&neighbors).cloned().collect();
-            let mut x_new = x.intersection(&neighbors).cloned().collect();
-            bron_kerbosch(graph, r, &mut p_new, &mut x_new, cliques);
-            r.pop();
-            p.remove(&v);
-            x.insert(v);
+    if results.len() >= MAX_COMBINATIONS {
+        return;
+    }
+
+    if index == course_lists.len() {
+        if current_combination.len() >= minimum {
+            if let Some(professors_list) = professors {
+                let mut professors_in_combination = HashSet::new();
+                for course in current_combination.iter() {
+                    if let Some(prof) = &course.profesor {
+                        if let Some(prof_name) = &prof.nombre {
+                            professors_in_combination.insert(prof_name.trim().to_string());
+                        }
+                    }
+                }
+                let professors_list_trimmed: HashSet<String> =
+                    professors_list.iter().map(|p| p.trim().to_string()).collect();
+                if !professors_list_trimmed.is_subset(&professors_in_combination) {
+                    return;
+                }
+            }
+            results.push(
+                current_combination
+                    .iter()
+                    .map(|&course| course.clone())
+                    .collect(),
+            );
+        }
+        return;
+    }
+
+    for &course in &course_lists[index] {
+        if !conflicts_with_current_combination(course, current_combination) {
+            current_combination.push(course);
+            generate_combinations(
+                course_lists,
+                current_combination,
+                index + 1,
+                results,
+                professors,
+                minimum,
+            );
+            current_combination.pop();
         }
     }
+
+    if current_combination.len() + (course_lists.len() - index - 1) >= minimum {
+        generate_combinations(
+            course_lists,
+            current_combination,
+            index + 1,
+            results,
+            professors,
+            minimum,
+        );
+    }
+}
+
+fn conflicts_with_current_combination(
+    course: &CourseSchedule,
+    current_combination: &Vec<&CourseSchedule>,
+) -> bool {
+    for &existing_course in current_combination {
+        if courses_overlap(course, existing_course) {
+            return true;
+        }
+    }
+    false
 }
 
 fn courses_overlap(course1: &CourseSchedule, course2: &CourseSchedule) -> bool {
@@ -103,10 +153,10 @@ fn courses_overlap(course1: &CourseSchedule, course2: &CourseSchedule) -> bool {
                 let start_time2 = parse_time(&schedule2.hora_inicio);
                 let end_time2 = parse_time(&schedule2.hora_fin);
 
-                if let (Some(start_time1), Some(end_time1), Some(start_time2), Some(end_time2)) =
+                if let (Some(start1), Some(end1), Some(start2), Some(end2)) =
                     (start_time1, end_time1, start_time2, end_time2)
                 {
-                    if (start_time1 < end_time2) && (end_time1 > start_time2) {
+                    if (start1 < end2) && (end1 > start2) {
                         return true;
                     }
                 }
@@ -116,7 +166,8 @@ fn courses_overlap(course1: &CourseSchedule, course2: &CourseSchedule) -> bool {
     false
 }
 
-fn parse_time(time_str: &str) -> Option<NaiveTime> {
-    NaiveTime::parse_from_str(time_str, "%H:%M:%S").ok()
-        .or_else(|| NaiveTime::parse_from_str(time_str, "%H:%M").ok())
+fn parse_time(time_str: &str) -> Option<chrono::NaiveTime> {
+    chrono::NaiveTime::parse_from_str(time_str, "%H:%M:%S")
+        .ok()
+        .or_else(|| chrono::NaiveTime::parse_from_str(time_str, "%H:%M").ok())
 }

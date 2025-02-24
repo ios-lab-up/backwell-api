@@ -44,9 +44,9 @@ services:
       dockerfile: Dockerfile
     container_name: rust_app
     environment:
-      - RUST_BACKTRACE=1
-      - RUST_LOG=debug
-      - DJANGO_API_URL=http://web:8000/api/cursos/
+      RUST_BACKTRACE: 1
+      RUST_LOG: info
+      DJANGO_API_URL: http://web:8000/api/cursos/
     ports:
       - "8082:8082"
     depends_on:

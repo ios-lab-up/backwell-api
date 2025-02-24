@@ -5,7 +5,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from .filters import CursoFilter
 
 class CursoViewSet(viewsets.ModelViewSet):
-    queryset = Curso.objects.all()
+    queryset = Curso.objects.filter(schedules__isnull=False)
     serializer_class = CursoSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_class = CursoFilter
