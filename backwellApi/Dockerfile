@@ -1,10 +1,14 @@
 # backwellApi/Dockerfile
 
-# Etapa de construcción
+# ----------------------
+# Builder Stage
+# ----------------------
 FROM rust:1.81-slim-bullseye AS builder
 
-# Instalar paquetes necesarios
-RUN apt-get update && apt-get install -y \
+# Set noninteractive mode and enable retries for apt-get
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update -o Acquire::Retries=3 && apt-get install -y \
     pkg-config \
     libssl-dev \
     ca-certificates \
@@ -12,30 +16,40 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copiar archivos de dependencia y crear un archivo main.rs temporal
+# Copy only the Cargo manifest files for dependency caching.
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir src && echo "fn main() {}" > src/main.rs
+# Ensure a target file exists so that Cargo recognizes a valid package.
+RUN mkdir -p src && if [ ! -f src/main.rs ]; then echo "fn main() {}" > src/main.rs; fi
 
-# Compilar dependencias
-RUN cargo build --release
+# Fetch dependencies (this layer is cached if Cargo.toml/lock remain unchanged)
+RUN cargo fetch
+# Build the binary target for caching (change --lib to --bin backwellApi)
+RUN cargo build --release --bin backwellApi
 
-# Copiar el código fuente y compilar la aplicación real
+# Now copy the full source code and rebuild the final binary.
 COPY . .
 RUN cargo build --release
 
-# Etapa final
+# ----------------------
+# Final Stage
+# ----------------------
 FROM debian:bullseye-slim
 
-# Instalar librerías necesarias
-RUN apt-get update && apt-get install -y ca-certificates \
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update -o Acquire::Retries=3 && apt-get install -y \
+    ca-certificates \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY --from=builder /app/target/release/backwellApi /usr/local/bin/backwellApi
 
-# Exponer el puerto de la aplicación
+# Copy the built binary from the builder stage and verify it exists.
+COPY --from=builder /app/target/release/backwellApi /usr/local/bin/backwellApi
+RUN if [ ! -f /usr/local/bin/backwellApi ]; then echo "Binary not found!" && exit 1; fi
+
+# Expose the service port
 EXPOSE 8082
 
-# Ejecutar la aplicación
+# Run the binary (logs will be output to the container log)
 CMD ["/usr/local/bin/backwellApi"]

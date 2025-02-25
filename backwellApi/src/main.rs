@@ -1,6 +1,5 @@
-// backwellApi/src/main.rs
-
 use actix_web::{web, App, HttpResponse, HttpServer};
+use actix_web::middleware::Logger;
 use log::{error, info};
 use reqwest::Client;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -9,6 +8,7 @@ use std::env;
 use url::Url;
 
 mod schedule_utils;
+
 
 #[derive(Deserialize)]
 struct GenerateScheduleRequest {
@@ -309,14 +309,27 @@ fn simplify_schedules(schedules: &Vec<Vec<CourseSchedule>>) -> Vec<ScheduleGroup
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    // Initialize logger (set RUST_LOG=debug for more verbosity in Docker)
     env_logger::init();
     let port = 8082;
     info!("Starting server at http://0.0.0.0:{}", port);
 
-    HttpServer::new(|| {
-        App::new().route("/v1/api/generate_schedule", web::post().to(generate_schedule))
+    // Build the HTTP server with Actix’s Logger middleware.
+    let server = HttpServer::new(|| {
+        App::new()
+            .wrap(Logger::default())
+            .route(
+                "/v1/api/generate_schedule",
+                web::post().to(generate_schedule),
+            )
     })
-    .bind(("0.0.0.0", port))?
-    .run()
-    .await
+    .bind(("0.0.0.0", port))
+    .map_err(|e| {
+         error!("Failed to bind server on port {}: {}", port, e);
+         e
+    })?;
+    
+    info!("Successfully bound to port {}", port);
+    // Run the server; this future will block indefinitely until shutdown.
+    server.run().await
 }
